@@ -2,15 +2,21 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"jejak/internal/middleware"
+	"jejak/internal/ratelimit"
 	"jejak/internal/db"
 	"jejak/internal/shortener"
 )
@@ -294,20 +300,27 @@ func (h *Handler) HandleRedirect(shortCode string, w http.ResponseWriter, r *htt
 //	Alternatif: Bisa pakai Redis Stream dengan consumer group untuk guarantee lebih kuat,
 //	tapi lebih kompleks bagi fase pengajaran ini.
 func (h *Handler) logClickAsync(shortCode string, r *http.Request) {
-	// Baseline mode (Async=false atau Redis=nil): tulis sinkron langsung ke DB.
-	// Pakai LogClick (event + counter 1 transaction) supaya jalur sinkron dan
-	// async (worker) menghasilkan data yang sama: click_events selalu terisi.
+	// Baseline mode (Async=false atau Redis=nil): tulis sinkron langsung ke DB,
+	// dengan CLICK EVENT lengkap (referrer_domain + is_unique + clicked_at)
+	// supaya jalur sinkron menghasilkan data identik dengan worker (satu jalur
+	// persist, dua mode penulisan). Ini Fase 14: unique click + referrer domain
+	// breakdown HARUS terisi juga di baseline, bukan cuma di mode async.
 	if !h.Async || h.Redis == nil {
-		if err := h.Store.LogClick(shortCode, r.Referer()); err != nil {
+		ev := h.buildClickEvent(shortCode, r) // necesita deteksi unique + fingerprint
+		if err := h.Store.LogClick(ev); err != nil {
 			h.Logger.Printf("Warning: failed to log click: %v", err)
 		}
 		return
 	}
 
-	// Create click event message
+	// Create click event message — field diisi LENGKAP supaya worker tidak
+	// perlu menebak/ulang-memparsing (fire-and-forget yang tetap akurat).
 	event := map[string]string{
-		"short_code": shortCode,
-		"referrer":   r.Referer(),
+		"short_code":     shortCode,
+		"referrer":       r.Referer(),
+		"referrer_domain": referrerDomain(r.Referer()),
+		"is_unique":      strconv.FormatBool(h.isUniqueClick(shortCode, r)),
+		"clicked_at":     time.Now().UTC().Format(time.RFC3339),
 	}
 
 	jsonData, err := json.Marshal(event)
@@ -322,6 +335,93 @@ func (h *Handler) logClickAsync(shortCode string, r *http.Request) {
 		h.Logger.Printf("Warning: failed to push click event to queue: %v", err)
 		// Don't return error - this is async, redirect should not be affected
 	}
+}
+
+// referrerDomain extracts the bare host (WITHOUT scheme + path) from a
+// Referer header. Alasan: breakdown analitik "per-domain" harus punya satu
+// bentuk konsisten — "https://google.com/", "google.com", "http://google.com"
+// semuanya harus masuk bucket yang sama, bukan 3 bucket terpisah.
+// Trade-off: Non-URL referrer (misal "android-app://x") dikembalikan apa
+// adanya via callfresh parse; corrupt dianggap kosong (referrer_domain NULL
+// di DB, tidak menyumbang breakdown). 
+func referrerDomain(ref string) string {
+	if strings.TrimSpace(ref) == "" {
+		return ""
+	}
+	u, err := url.Parse(ref)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return u.Host
+}
+
+// clickFingerprint produces a stable-per-visitor hash so we can tell "adakah
+// orang yang sama ini sudah klik link sama dalam 24 jam?" — dasar is_unique.
+// Fingerprint = client IP + User-Agent (dua sinyal yang paling membedakan
+// visitor di level HTTP yang kita punya). Trade-off: hash berarti kita tidak
+// menyimpan IP mentah di mana pun (privasi), tapi dua orang di NAT/UA yang
+// identik bisa salah dianggap "satu orang". Bit.ly punya masalah yang sama.
+func (h *Handler) clickFingerprint(r *http.Request) string {
+	sum := sha256.Sum256([]byte(ratelimit.ClientIP(r.RemoteAddr, r.Header.Get("X-Forwarded-For")) + "|" + r.UserAgent()))
+	return hex.EncodeToString(sum[:])
+}
+
+// isUniqueClick says whether THIS visitor (per fingerprint) is new to THIS
+// shortCode within the last 24h (bit.ly-style unique window).
+//
+//	Mode Redis set (produksi/async): SETNX atomik key = unique.
+//	
+//	
+//	Mode Redis nil (baseline): pakai map in-memory (uniqueSeen) yang dijaga
+//	Handler. Ini mode Fase 14 baseline: unik tetap terhitung akurat dalam
+//	proses single-worker (bukan cuma di async). Trade-off: state hidup di
+//	memory proses ini saja — tidak ter-distribusi antar instance; bila proses
+//	restart, window unik "hangat kembali". Pendekatan ini cocok untuk hvandelt
+//	single-process baseline; produksi memakai Redis SETNX yang shared +
+//	persisten. Lihat juga LEARN di logClickAsync & comment di handler.go.
+func (h *Handler) isUniqueClick(shortCode string, r *http.Request) bool {
+	key := "click:unique:" + shortCode + ":" + h.clickFingerprint(r)
+	if h.Redis != nil {
+		// SETNX returns true only when the key did NOT exist (i.e. first time
+		// THIS fingerprint shows up). TTL 24h = the dedup window; after that
+		// the same visitor counts as a NEW unique click (exactly bit.ly).
+		n, err := h.Redis.SetNX(context.Background(), key, "1", 24*time.Hour).Result()
+		if err != nil {
+			h.Logger.Printf("Warning: unique-click check failed, treating as unique: %v", err)
+			return true
+		}
+		return n
+	}
+
+	// Baseline (Redis == nil): in-memory 24h window synced by uniqueMu.
+	h.uniqueMu.Lock()
+	defer h.uniqueMu.Unlock()
+	if h.uniqueSeen == nil {
+		h.uniqueSeen = make(map[string]int64)
+	}
+	now := time.Now().Unix()
+	last, seen := h.uniqueSeen[key]
+	if seen && now-last < int64(24*time.Hour/time.Second) {
+		return false // same visitor within window → not a new unique click
+	}
+	h.uniqueSeen[key] = now
+	return true
+}
+
+// buildClickEvent assembles the FULL ClickEvent so LogClick (baseline sync)
+// and the async worker both persist the SAME complete metadata: referrer +
+// referrer_domain (breakdown analitik), is_unique (window 24h), dan
+// clicked_at = waktu klik ASLI (bukan waktu proses). Satu jalur persist,
+// dua mode penulisan — lihat LEARN logClickAsync.
+func (h *Handler) buildClickEvent(shortCode string, r *http.Request) db.ClickEvent {
+	ev := db.ClickEvent{
+		ShortCode:      shortCode,
+		Referrer:       r.Referer(),
+		ReferrerDomain: referrerDomain(r.Referer()),
+		IsUnique:       h.isUniqueClick(shortCode, r),
+		ClickedAt:      time.Now().UTC(),
+	}
+	return ev
 }
 
 // LEARN:

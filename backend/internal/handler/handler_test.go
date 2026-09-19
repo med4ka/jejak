@@ -138,7 +138,7 @@ func (f *fakeStore) ListLinksByCreatorPrimary(creatorID int64) ([]db.Link, error
 	return f.ListLinksByCreator(creatorID)
 }
 func (f *fakeStore) ReorderLinks(creatorID int64, order []string) error { return nil }
-func (f *fakeStore) LogClick(shortCode, referrer string) error          { return nil }
+func (f *fakeStore) LogClick(e	db.ClickEvent) error { return nil }
 func (f *fakeStore) ClaimLinks(creatorID int64, codes []string) (int64, error) {
 	f.claimCodes = append(f.claimCodes, codes...)
 	return f.claimResult, nil
@@ -154,6 +154,8 @@ func (f *fakeStore) GetLink(shortCode string) (db.Link, error) {
 	return f.link, nil
 }
 
+func (f *fakeStore) DeleteLink(creatorID int64, shortCode string) error { return nil }
+func (f *fakeStore) SetLinkActive(creatorID int64, shortCode string, active bool) error { return nil }
 func (f *fakeStore) UpdateLink(creatorID int64, shortCode, deviceRulesJSON, tagsJSON string) error {
 	if f.updateErr != nil {
 		return f.updateErr

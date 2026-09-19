@@ -39,13 +39,29 @@ import (
 //	Alternatif: Tabel link_tags(link, tag) + tabel tags — benar untuk sistem
 //	tagging skala besar, over-engineering untuk JC ini.
 type Link struct {
-	ShortCode   string            `json:"short_code"`
-	OriginalURL string            `json:"original_url"`
-	ClickCount  int64             `json:"click_count"`
-	Position    int               `json:"position"`
-	IsFeatured  bool              `json:"is_featured"`
-	Tags        []string          `json:"tags"`
-	DeviceRules map[string]string `json:"device_rules,omitempty"`
+	ShortCode        string            `json:"short_code"`
+	OriginalURL      string            `json:"original_url"`
+	ClickCount       int64             `json:"click_count"`
+	UniqueClickCount int64             `json:"unique_click_count"`
+	Position         int               `json:"position"`
+	IsFeatured       bool              `json:"is_featured"`
+	IsActive         bool              `json:"is_active"`
+	Tags             []string          `json:"tags"`
+	DeviceRules      map[string]string `json:"device_rules,omitempty"`
+}
+
+// ClickEvent is ONE persisted click (Fase 13). Sebelumnya LogClick hanya
+// menerima (short_code, referrer) dan timestap diambil dari DEFAULT CURRENT_TIMESTAMP
+// saat worker INSERT — yang berarti clicked_at = waktu PROSES, bukan waktu user
+// klik. Sekarang handler/worker mengirim event lengkap: clicked_at eksplisit
+// (waktu klik asli), is_unique (visitor berbeda, window 24h ala bit.ly),
+// referrer_domain (host referrer tanpa path — dasar breakdown analitik).
+type ClickEvent struct {
+	ShortCode       string
+	Referrer        string
+	ReferrerDomain  string
+	IsUnique        bool
+	ClickedAt       time.Time
 }
 
 // parseRules decodes the device_rules JSONB document. Corrupt/empty/'{}' -> nil
@@ -62,16 +78,16 @@ func parseRules(raw sql.NullString) map[string]string {
 }
 
 // scanLinks reads link rows (SELECT must include is_featured AND
-// COALESCE(tags,'[]') AS tags AND COALESCE(device_rules,'{}') AS device_rules).
-// Corrupt JSON fails soft to empty (1 baris rusak tidak boleh merobohkan
-// seluruh list).
+// COALESCE(tags,'[]') AS tags AND COALESCE(device_rules,'{}') AS device_rules
+// AND unique_click_count AND is_active). Corrupt JSON fails soft to empty
+// (1 baris rusak tidak boleh merobohkan seluruh list).
 func scanLinks(rows *sql.Rows) ([]Link, error) {
 	var out []Link
 	for rows.Next() {
 		var l Link
 		var tags sql.NullString
 		var rules sql.NullString
-		if err := rows.Scan(&l.ShortCode, &l.OriginalURL, &l.ClickCount, &l.Position, &l.IsFeatured, &tags, &rules); err != nil {
+		if err := rows.Scan(&l.ShortCode, &l.OriginalURL, &l.ClickCount, &l.UniqueClickCount, &l.Position, &l.IsFeatured, &l.IsActive, &tags, &rules); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -108,12 +124,17 @@ type ShardStore interface {
 	// read-your-own-writes yang sama dengan GetCreatorByIDPrimary).
 	ListLinksByCreatorPrimary(creatorID int64) ([]Link, error)
 	ReorderLinks(creatorID int64, order []string) error
-	LogClick(shortCode, referrer string) error
+	LogClick(e ClickEvent) error
 	ClaimLinks(creatorID int64, codes []string) (int64, error)
 	ClicksByDay(creatorID int64) ([]DayCount, error)
 	GetLink(shortCode string) (Link, error)
 	UpdateLink(creatorID int64, shortCode, deviceRulesJSON, tagsJSON string) error
 	SetFeaturedLink(creatorID int64, shortCode string, featured bool) error
+	// SetLinkActive toggles is_active (Fase 13: disable link -> 410 di redirect,
+	// sembunyi dari publik; dashboard tetap melihatnya supaya bisa dihidupkan).
+	SetLinkActive(creatorID int64, shortCode string, active bool) error
+	// DeleteLink removes an OWNED link permanently + history click_events-nya.
+	DeleteLink(creatorID int64, shortCode string) error
 	StoreAPIKey(creatorID int64, keyHash, label string) (int64, error)
 	ListAPIKeys(creatorID int64) ([]APIKey, error)
 	DeleteAPIKey(creatorID int64, keyID int64) error
@@ -223,12 +244,14 @@ func (s *SingleStore) GetCreatorByIDPrimary(id int64) (Creator, error) {
 	return c, err
 }
 
-// ListLinksByCreator returns ALL links of one creator in ONE query, denormalized
-// click_count included — this is the deliberate N+1 avoidance (PRD.md §2):
-// one WHERE creator_id query instead of 1 + N per-row count queries.
+// ListLinksByCreator returns ACTIVE links of one creator in ONE query,
+// denormalized click_count + unique_click_count included — this is the
+// deliberate N+1 avoidance (PRD.md §2): one WHERE creator_id query instead
+// of 1 + N per-row count queries. Public path (GET /api/u/id): disabled
+// links (is_active=false) tidak ditampilkan ke publik, seperti bit.ly.
 func (s *SingleStore) ListLinksByCreator(creatorID int64) ([]Link, error) {
 	rows, err := s.readDB().Query(
-		"SELECT short_code, original_url, click_count, position, is_featured, COALESCE(tags,'[]'), COALESCE(device_rules,'{}') FROM urls WHERE creator_id = $1 ORDER BY position ASC, id DESC",
+		"SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}') FROM urls WHERE creator_id = $1 AND is_active = TRUE ORDER BY position ASC, id DESC",
 		creatorID,
 	)
 	if err != nil {
@@ -237,11 +260,13 @@ func (s *SingleStore) ListLinksByCreator(creatorID int64) ([]Link, error) {
 	return scanLinks(rows)
 }
 
-// ListLinksByCreatorPrimary returns ALL links of one creator directly from the
-// PRIMARY (read-your-own-writes untuk dashboard; lihat GetCreatorByIDPrimary).
+// ListLinksByCreatorPrimary returns ALL links (active AND disabled) of one
+// creator directly from the PRIMARY (read-your-own-writes untuk dashboard;
+// lihat GetCreatorByIDPrimary). Dashboard perlu melihat link disabled supaya
+// pemiliknya bisa menyalakan lagi.
 func (s *SingleStore) ListLinksByCreatorPrimary(creatorID int64) ([]Link, error) {
 	rows, err := s.primary.Query(
-		"SELECT short_code, original_url, click_count, position, is_featured, COALESCE(tags,'[]'), COALESCE(device_rules,'{}') FROM urls WHERE creator_id = $1 ORDER BY position ASC, id DESC",
+		"SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}') FROM urls WHERE creator_id = $1 ORDER BY position ASC, id DESC",
 		creatorID,
 	)
 	if err != nil {
@@ -361,8 +386,10 @@ func (s *shardStore) GetCreatorByIDPrimary(id int64) (Creator, error) {
 }
 
 // ListLinksByCreator queries every shard with the same single-query shape
-// (denormalized click_count, no N+1) and merges. Cross-shard ordering is
-// by shard index, not global time — acceptable for learning scale.
+// (denormalized click_count, no N+1) and merges. Khusus mode publik
+// (is_active = TRUE): tile link yang di-disable tidak terlihat oleh pengunjung.
+// Cross-shard ordering is by shard index, not global time — acceptable for
+// learning scale.
 func (s *shardStore) ListLinksByCreator(creatorID int64) ([]Link, error) {
 	var out []Link
 	for i := 0; i < s.numShards; i++ {
@@ -371,7 +398,7 @@ func (s *shardStore) ListLinksByCreator(creatorID int64) ([]Link, error) {
 			continue
 		}
 		rows, err := db.Query(
-			"SELECT short_code, original_url, click_count, position, is_featured, COALESCE(tags,'[]'), COALESCE(device_rules,'{}') FROM urls WHERE creator_id = $1 ORDER BY position ASC, id DESC",
+			"SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}') FROM urls WHERE creator_id = $1 AND is_active = TRUE ORDER BY position ASC, id DESC",
 			creatorID,
 		)
 		if err != nil {
@@ -413,10 +440,12 @@ func (s *shardStore) ReorderLinks(creatorID int64, order []string) error {
 	return nil
 }
 
-// LogClick routes the event write to the short_code's shard (log + counter
+// LogClick routes the event write to the short_code's shard (log + counters
 // in one transaction, same semantics as SingleStore — see LEARN there).
-func (s *shardStore) LogClick(shortCode, referrer string) error {
-	shardIdx := shortener.ShardKey(shortCode, s.numShards)
+// Unique clicks (Fase 13): saat IsUnique, kedua counter naik (total + unik);
+// repeat visits hanya menaikkan click_count.
+func (s *shardStore) LogClick(e ClickEvent) error {
+	shardIdx := shortener.ShardKey(e.ShortCode, s.numShards)
 	db, ok := s.shards[shardIdx]
 	if !ok {
 		return sql.ErrConnDone
@@ -427,18 +456,34 @@ func (s *shardStore) LogClick(shortCode, referrer string) error {
 	}
 	defer tx.Rollback()
 	if _, err := tx.Exec(
-		"INSERT INTO click_events (short_code, referrer) VALUES ($1, NULLIF($2,''))",
-		shortCode, referrer,
+		"INSERT INTO click_events (short_code, referrer, referrer_domain, is_unique, clicked_at) VALUES ($1, NULLIF($2,''), NULLIF($3,''), $4, $5)",
+		e.ShortCode, e.Referrer, e.ReferrerDomain, e.IsUnique, clickTime(e.ClickedAt),
 	); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(
-		"UPDATE urls SET click_count = click_count + 1 WHERE short_code = $1",
-		shortCode,
+		"UPDATE urls SET click_count = click_count + 1, unique_click_count = unique_click_count + $1 WHERE short_code = $2",
+		e.IsUniqueBool(), e.ShortCode,
 	); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// IsUniqueBool converts the boolean to 0/1 for the SQL addition.
+func (e ClickEvent) IsUniqueBool() int {
+	if e.IsUnique {
+		return 1
+	}
+	return 0
+}
+
+// clickTime returns the explicit click timestamp, or now when zero (defensive).
+func clickTime(t time.Time) time.Time {
+	if t.IsZero() {
+		return time.Now()
+	}
+	return t
 }
 
 // ClicksByDay merges per-day counts from all shards, then zero-fills the
@@ -558,6 +603,70 @@ func (s *shardStore) SetFeaturedLink(creatorID int64, shortCode string, featured
 	return nil
 }
 
+// Connect to the link's shard (shared helper used by the four lifecycle
+// methods DeleteLink / SetLinkActive / UpdateLink / CreateURL). Shortens
+// the repetitive "compute shard, look up db, bail if missing" preamble.
+// Trade-off: hides WHERE the shard lives, tapi semua panggi di bawah memang
+// tidak peduli — mereka hanya butuh db yang benar untuk routing pendek.
+func (s *shardStore) shardFor(shortCode string) (*sql.DB, error) {
+	shardIdx := shortener.ShardKey(shortCode, s.numShards)
+	db, ok := s.shards[shardIdx]
+	if !ok {
+		return nil, sql.ErrConnDone
+	}
+	return db, nil
+}
+
+// DeleteLink implements ShardStore - permanent delete, owner-scoped. Mirrors
+// SingleStore.DeleteLink: owner-scoped WHERE + related-rows cleanup. Trade-off
+// (serial di sini): deletes happen sequentially across shards — if the process
+// dies mid-way some click_events might be orphaned. Acceptable: a hard-deleted
+// link is intentionally rare and the FK is ON DELETE CASCADE (migration 01).
+func (s *shardStore) DeleteLink(creatorID int64, shortCode string) error {
+	db, err := s.shardFor(shortCode)
+	if err != nil {
+		return err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(
+		"DELETE FROM urls WHERE short_code = $1 AND creator_id = $2",
+		shortCode, creatorID,
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return sql.ErrNoRows
+	}
+	return tx.Commit()
+}
+
+// SetLinkActive implements ShardStore - owner-scoped broadcast of is_active
+// (Fase 13 lifecycle). Trade-off: no transaction across shards — if the two
+// rows fight feature state mid-write, both may briefly be active; scoped to
+// the single short_code so only one shard is touched per call.
+func (s *shardStore) SetLinkActive(creatorID int64, shortCode string, active bool) error {
+	db, err := s.shardFor(shortCode)
+	if err != nil {
+		return err
+	}
+	res, err := db.Exec(
+		"UPDATE urls SET is_active = $1 WHERE short_code = $2 AND creator_id = $3",
+		active, shortCode, creatorID,
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 // API key rows live on shard 0 together with creators (see NOTE at shardZero):
 // keys are per-creator metadata, not per-URL data, so they follow the same
 // no-sharding simplification as Fase 9's creators table.
@@ -659,7 +768,8 @@ func (s *shardStore) GetURL(shortCode string) (string, error) {
 }
 
 // GetLink implements ShardStore - routes to the shard and returns the row
-// needed for Smart Link device routing (original_url + device_rules).
+// needed for Smart Link device routing (original_url + device_rules) plus
+// lifecycle state is_active (redirect → 410 when disabled, Fase 13).
 func (s *shardStore) GetLink(shortCode string) (Link, error) {
 	shardIdx := shortener.ShardKey(shortCode, s.numShards)
 	db, ok := s.shards[shardIdx]
@@ -669,9 +779,9 @@ func (s *shardStore) GetLink(shortCode string) (Link, error) {
 	var l Link
 	var rules sql.NullString
 	err := db.QueryRow(
-		"SELECT short_code, original_url, COALESCE(device_rules,'{}') FROM urls WHERE short_code = $1",
+		"SELECT short_code, original_url, COALESCE(device_rules,'{}'), is_active FROM urls WHERE short_code = $1",
 		shortCode,
-	).Scan(&l.ShortCode, &l.OriginalURL, &rules)
+	).Scan(&l.ShortCode, &l.OriginalURL, &rules, &l.IsActive)
 	if err != nil {
 		return Link{}, err
 	}
@@ -708,7 +818,7 @@ func (s *shardStore) ListLinks() ([]Link, error) {
 		if !ok {
 			continue
 		}
-		rows, err := db.Query("SELECT short_code, original_url, click_count, position, is_featured, COALESCE(tags,'[]'), COALESCE(device_rules,'{}') FROM urls ORDER BY id DESC")
+		rows, err := db.Query("SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}') FROM urls ORDER BY id DESC")
 		if err != nil {
 			return nil, err
 		}
@@ -821,15 +931,16 @@ func (s *SingleStore) GetURL(shortCode string) (string, error) {
 	return url, nil
 }
 
-// GetLink reads the full redirect row (original_url + device_rules) — needed
-// by the Smart Link redirect path to route by device. Same read path as GetURL.
+// GetLink reads the full redirect row (original_url + device_rules +
+// is_active) — needed by the Smart Link redirect path to route by device and
+// to answer 410 for disabled links. Same read path as GetURL.
 func (s *SingleStore) GetLink(shortCode string) (Link, error) {
 	var l Link
 	var rules sql.NullString
 	err := s.readDB().QueryRow(
-		"SELECT short_code, original_url, COALESCE(device_rules,'{}') FROM urls WHERE short_code = $1",
+		"SELECT short_code, original_url, COALESCE(device_rules,'{}'), is_active FROM urls WHERE short_code = $1",
 		shortCode,
-	).Scan(&l.ShortCode, &l.OriginalURL, &rules)
+	).Scan(&l.ShortCode, &l.OriginalURL, &rules, &l.IsActive)
 	if err != nil {
 		return Link{}, err
 	}
@@ -851,7 +962,7 @@ func (s *SingleStore) GetShard(shortCode string) *sql.DB {
 // ListLinks returns all links, read from the replica when enabled
 // (Fase 8 dashboard reads from the read replica).
 func (s *SingleStore) ListLinks() ([]Link, error) {
-	rows, err := s.readDB().Query("SELECT short_code, original_url, click_count, position, is_featured, COALESCE(tags,'[]'), COALESCE(device_rules,'{}') FROM urls ORDER BY id DESC")
+	rows, err := s.readDB().Query("SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}') FROM urls ORDER BY id DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -955,9 +1066,49 @@ func (s *SingleStore) SetFeaturedLink(creatorID int64, shortCode string, feature
 	return tx.Commit()
 }
 
-// LEARN:
-//
-//	Kenapa: Storage API key memakai pola yang sama seperti password — hanya
+// DeleteLink implements ShardStore on the single non-sharded store — same
+// owner-scoped hard-delete semantics as shardStore.DeleteLink, in ONE
+// transaction: click_events dulu (FK ke urls), lalu urls. Worker memakai
+// SingleStore sebagai ShardStore (cmd/worker), jadi lifecycle delete harus
+// jalan di sini juga.
+func (s *SingleStore) DeleteLink(creatorID int64, shortCode string) error {
+	tx, err := s.primary.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec("DELETE FROM click_events WHERE short_code = $1", shortCode); err != nil {
+		return err
+	}
+	res, err := tx.Exec(
+		"DELETE FROM urls WHERE short_code = $1 AND creator_id = $2",
+		shortCode, creatorID,
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return sql.ErrNoRows
+	}
+	return tx.Commit()
+}
+
+// SetLinkActive implements ShardStore on the single store — owner-scoped
+// toggle of is_active (Fase 14 active/inactive lifecycle). Mirrors
+// shardStore.SetLinkActive; single store tidak butuh shard routing.
+func (s *SingleStore) SetLinkActive(creatorID int64, shortCode string, active bool) error {
+	res, err := s.primary.Exec(
+		"UPDATE urls SET is_active = $1 WHERE short_code = $2 AND creator_id = $3",
+		active, shortCode, creatorID,
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
 //	hash yang disimpan, key asli tidak pernah menyentuh database. Kalau
 //	database bocor, attacker tidak langsung bisa pakai key tersebut; format
 //	"jjk_" + 32 hex (128 bit) membuat brute-force SHA-256 mustahil secara
@@ -1108,21 +1259,25 @@ func FillLast30Days(counts map[string]int64, today time.Time) []DayCount {
 //	di tengah = event hilang + warning log (tidak ada retry/antrian mati).
 //	Alternatif: Pisah jadi 2 operasi tanpa transaction (risiko skew) atau
 //	hitung counter dari agregat click_events saat dibaca (mahal, anti-Fase 2).
-func (s *SingleStore) LogClick(shortCode, referrer string) error {
+// LogClick writes one click: INSERT click_events (with is_unique flag +
+// referrer_domain) + increment click_count (dan unique_click_count bila
+// is_unique) dalam 1 transaction — atomic seperti Fase 2 (dua angka ini
+// tidak boleh tidak sinkron).
+func (s *SingleStore) LogClick(e ClickEvent) error {
 	tx, err := s.primary.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	if _, err := tx.Exec(
-		"INSERT INTO click_events (short_code, referrer) VALUES ($1, NULLIF($2,''))",
-		shortCode, referrer,
+		"INSERT INTO click_events (short_code, referrer, referrer_domain, is_unique, clicked_at) VALUES ($1, NULLIF($2,''), NULLIF($3,''), $4, $5)",
+		e.ShortCode, e.Referrer, e.ReferrerDomain, e.IsUnique, clickTime(e.ClickedAt),
 	); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(
-		"UPDATE urls SET click_count = click_count + 1 WHERE short_code = $1",
-		shortCode,
+		"UPDATE urls SET click_count = click_count + 1, unique_click_count = unique_click_count + $1 WHERE short_code = $2",
+		e.IsUniqueBool(), e.ShortCode,
 	); err != nil {
 		return err
 	}

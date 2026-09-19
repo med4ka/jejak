@@ -113,10 +113,30 @@ func (w *Worker) processEvent(msg string) {
 		return
 	}
 
+	// Fase 14: referrer_domain + is_unique + clicked_at dikirim handler via
+	// queue (lihat logClickAsync). Worker hanya meneruskan nilai itu ke
+	// LogClick supaya analitik breakdown per-domain & unique count akurat.
+	// clicked_at default ke now kalau field tidak ada (defensive).
+	clickedAt := time.Now()
+	if ts := event["clicked_at"]; ts != "" {
+		if t, err := time.Parse(time.RFC3339, ts); err == nil {
+			clickedAt = t
+		} else {
+			log.Printf("Warning: click event has invalid clicked_at %q: %v", ts, err)
+		}
+	}
+	unique := event["is_unique"] == "true"
+
 	// Persist: one transaction writes the event row + bumps the counter.
 	// At-most-once: failure here loses the event (logged, not retried) —
 	// same fire-and-forget philosophy as the redirect path.
-	if err := w.store.LogClick(shortCode, event["referrer"]); err != nil {
+	if err := w.store.LogClick(db.ClickEvent{
+		ShortCode:      shortCode,
+		Referrer:       event["referrer"],
+		ReferrerDomain: event["referrer_domain"],
+		IsUnique:       unique,
+		ClickedAt:      clickedAt,
+	}); err != nil {
 		log.Printf("Warning: failed to persist click event for %s: %v", shortCode, err)
 		return
 	}

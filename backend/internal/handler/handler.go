@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/redis/go-redis/v9"
 
@@ -46,6 +47,16 @@ type Handler struct {
 	// per key — lebih longgar dari login rate limit). Set by main; nil =
 	// no throttling (tests, baseline mode).
 	APILimiter *ratelimit.Limiter
+
+	// uniqueMu guards uniqueSeen — in-memory dedup fallback (Fase 14) yang
+	// dipakai ketika Redis == nil (baseline single-process). isUniqueClick
+	// menulis di sini dgn window 24h supaya klik unik TETAP terisi akurat di
+	// baseline — bukan cuma di mode async (lihat LEARN di logClickAsync).
+	// Trade-off: State hidup di memory proses ini saja (tidak shared antar
+	// instance). Cocok untuk baseline single-worker; produksi memakai Redis
+	// SETNX yang shared + persisten (lihat isUniqueClick).
+	uniqueMu   sync.Mutex
+	uniqueSeen map[string]int64
 }
 
 // LEARN:
