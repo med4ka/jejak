@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Signature lama (.laminate-strip) dihapus bersama palet Laminated Pass.
+   Signature baru (§3 "Instant Frame"): border ink tebal + margin bawah
+   Polaroid, diimplementasikan langsung di komponen via utility Tailwind. */
+
+/* Tema "darkroom" (kamar gelap cuci foto) di halaman publik: halaman ditutup
+   div-layout bg-print-white, lalu ProfileLinks menempelkan
+   data-profile-theme ke <body> saat berdiri di /u/[username] (efek scoped ke
+   halaman itu; dibersihkan saat unmount). Warna text tetap dikontrol utility
+   class per-komponen, body hanya butuh background swap supaya tidak ada pita
+   putih di bawah/main di luar konten. #121212 = hitam netral pekat (bukan ink
+   #1C1A12 yang kecoklatan) — esensi konsep darkroom. */
+body[data-profile-theme="classic"] {
+  background-color: #FAFAF7;
+}
+
+body[data-profile-theme="coral"] {
+  /* Coral == CLassic fix: coral harus punya panggung sendiri supaya tidak
+     jatuh ke body default (identik dgn classic). Cream hangat #F5F1E8 —
+     beda lembut dari classic #FAFAF7, pas dengan aksen oranye flash-orange. */
+  background-color: #F5F1E8;
+}
+
+body[data-profile-theme="darkroom"] {
+  background-color: #121212;
+}
+
+/* Tema "glass" (preset 4, ala macOS/iOS Control Center versi TERANG): panggung
+   abu-putih LEMBUT #ECECEC (netral, r≈g≈b) + backdrop radial-gradient terang
+   #F5F5F5→#E8E8E8 (di-render ThemeBackdrop, fixed -z-10) + grain halus 3-5%
+   (div SVG noise opacity rendah di ThemeBackdrop — BUKAN foto noise 15%+).
+   Body cuma fallback solid terang; styling utama ada di ThemeBackdrop. */
+body[data-profile-theme="glass"] {
+  background-color: #ECECEC;
+}

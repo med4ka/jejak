@@ -1,0 +1,14 @@
+# syntax=docker/dockerfile:1
+# Build context: backend/ (docker compose: context: ../backend, dockerfile: Dockerfile.worker)
+FROM golang:1.25-alpine AS builder
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -o /out/worker ./cmd/worker
+
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates
+WORKDIR /app
+COPY --from=builder /out/worker /app/worker
+ENTRYPOINT ["/app/worker"]

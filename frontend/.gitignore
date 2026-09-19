@@ -1,0 +1,15 @@
+# Node / Next.js.
+node_modules/
+.next/
+out/
+build/
+
+# Env lokal frontend (kalau ada).
+.env
+.env.*
+!.env.example
+
+# Cache / misc.
+*.log
+.turbo/
+.vercel/

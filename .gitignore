@@ -1,0 +1,38 @@
+# Secrets / env — JANGAN pernah commit kredensial lokal.
+# .env.example tetap di-track; .env berisi nilai asli (password, URL).
+.env
+.env.*
+!.env.example
+
+# Build artifacts Go (backend module: cmd/server, cmd/worker, cmd/proxy, cmd/loadtest).
+*.exe
+*.exe~
+*.test
+*.out
+
+# Runtime logs.
+*.log
+
+# Hasil build/harness lokal (bin/, screenshot/loadtest output).
+/bin/
+
+# Uploaded avatars — data runtime, bukan source.
+# Folder tetap ada via backend/uploads/avatars/.gitkeep.
+/backend/uploads/*
+!/backend/uploads/avatars/
+/backend/uploads/avatars/*
+!/backend/uploads/avatars/.gitkeep
+
+# Temp / scratch (dibuat sambil belajar, bukan bagian source).
+/tmp_*.go
+/body.json
+/timeshot-*.ps1
+*~
+
+# Artefak test avatar (test jalan dengan cwd = package dir, jadi menulis di sini).
+/backend/internal/handler/uploads/
+
+# OS / editor junk.
+.DS_Store
+Thumbs.db
+desktop.ini

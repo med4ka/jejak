@@ -1,0 +1,106 @@
+# Jalankan dari ROOT repo:
+#   Full stack : docker compose -f infra/docker-compose.yml up --build
+#   Baseline   : $env:APP_MODE='baseline'; docker compose -f infra/docker-compose.yml up --build postgres redis api1
+#                (1 instance, tanpa nginx/api2/worker; cache+queue dimatikan oleh APP_MODE di kode)
+services:
+  postgres:
+    image: postgres:17
+    # WAL settings supaya postgres_replica bisa streaming replication dari primary ini.
+    command: ["postgres", "-c", "wal_level=replica", "-c", "max_wal_senders=10", "-c", "max_replication_slots=10"]
+    environment:
+      POSTGRES_DB: jejak
+      POSTGRES_USER: jejak
+      POSTGRES_PASSWORD: password
+      # trust = tanpa password, HANYA untuk belajar lokal. Jangan dipakai di production.
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../backend/db/init-primary:/docker-entrypoint-initdb.d:ro
+
+  postgres_replica:
+    image: postgres:17
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: jejak
+      POSTGRES_USER: jejak
+      POSTGRES_PASSWORD: password
+      POSTGRES_HOST_AUTH_METHOD: trust
+      PRIMARY_HOST: postgres
+    volumes:
+      - postgres_replica_data:/var/lib/postgresql/data
+      - ../backend/db/replica-entrypoint.sh:/usr/local/bin/replica-entrypoint.sh:ro
+    # sh form: tidak butuh exec bit (aman untuk checkout Windows).
+    entrypoint: ["sh", "/usr/local/bin/replica-entrypoint.sh"]
+    command: ["postgres", "-c", "hot_standby=on"]
+    depends_on:
+      - postgres
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  api1:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    depends_on:
+      - postgres
+      - postgres_replica
+      - redis
+    environment:
+      APP_MODE: ${APP_MODE:-full}
+      PORT: 8080
+      DATABASE_URL: postgres://jejak:password@postgres:5432/jejak?sslmode=disable
+      DATABASE_REPLICA_URL: postgres://jejak:password@postgres_replica:5432/jejak?sslmode=disable
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "8081:8080"
+    restart: unless-stopped
+
+  api2:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    depends_on:
+      - postgres
+      - postgres_replica
+      - redis
+    environment:
+      APP_MODE: ${APP_MODE:-full}
+      PORT: 8080
+      DATABASE_URL: postgres://jejak:password@postgres:5432/jejak?sslmode=disable
+      DATABASE_REPLICA_URL: postgres://jejak:password@postgres_replica:5432/jejak?sslmode=disable
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "8082:8080"
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile.worker
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgres://jejak:password@postgres:5432/jejak?sslmode=disable
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api1
+      - api2
+
+volumes:
+  postgres_data:
+  postgres_replica_data:
