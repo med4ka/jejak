@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"jejak/internal/middleware"
 	"jejak/internal/db"
+	"jejak/internal/middleware"
 	"jejak/internal/shortener"
 )
 
@@ -231,6 +231,7 @@ func TestHandleRedirectDeviceRouting(t *testing.T) {
 	s.link = db.Link{
 		ShortCode: "abc123", OriginalURL: "https://default.com",
 		DeviceRules: map[string]string{"ios": "https://ios.example.com"},
+		IsActive:    true,
 	}
 
 	tests := []struct {
@@ -270,6 +271,92 @@ func TestHandleRedirectUnknownLink404(t *testing.T) {
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rr.Code)
 	}
+}
+
+// TestHandleRedirectDisabledLink410 proves the Fase 13 lifecycle is honored:
+// a link with is_active=false must NOT redirect (410 Gone) and must not leak
+// into a Location header. DB path (cache nil).
+func TestHandleRedirectDisabledLink410(t *testing.T) {
+	s := &fakeStore{}
+	h := newTestHandler(s)
+	s.link = db.Link{
+		ShortCode: "off01", OriginalURL: "https://default.com",
+		IsActive: false,
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/r/off01", nil)
+	rr := httptest.NewRecorder()
+	h.HandleRedirect("off01", rr, req)
+	if rr.Code != http.StatusGone {
+		t.Fatalf("status = %d, want 410 (body %q)", rr.Code, rr.Body.String())
+	}
+	if loc := rr.Header().Get("Location"); loc != "" {
+		t.Fatalf("disabled link must not redirect, got Location %q", loc)
+	}
+}
+
+// TestHandleRedirectDisabledLinkCacheHit410 proves a cache entry marked
+// disabled is honored (410) AND evicted, so re-enabling the link makes the
+// very next request read the fresh DB row instead of a stale 300s entry.
+func TestHandleRedirectDisabledLinkCacheHit410(t *testing.T) {
+	s := &fakeStore{}
+	h := newTestHandler(s)
+	h.Cache = &mapCache{data: map[string]string{"off01": `{"url":"https://default.com","disabled":true}`}}
+
+	req := httptest.NewRequest(http.MethodGet, "/r/off01", nil)
+	rr := httptest.NewRecorder()
+	h.HandleRedirect("off01", rr, req)
+	if rr.Code != http.StatusGone {
+		t.Fatalf("status = %d, want 410 (body %q)", rr.Code, rr.Body.String())
+	}
+	if _, ok := h.Cache.Get("off01"); ok {
+		t.Fatal("disabled cache entry not evicted after 410")
+	}
+}
+
+// TestHandleRedirectCacheHitActiveStillRedirects locks in that a cache hit for
+// an ACTIVE link keeps routing by device (and cleanly handles a cache that is
+// writable — the legacy code path always touched the store first).
+func TestHandleRedirectCacheHitActiveStillRedirects(t *testing.T) {
+	s := &fakeStore{}
+	h := newTestHandler(s)
+	h.Cache = &mapCache{data: map[string]string{
+		"abc123": `{"url":"https://default.com","device_rules":{"ios":"https://ios.example.com"}}`,
+	}}
+
+	req := httptest.NewRequest(http.MethodGet, "/r/abc123", nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)")
+	rr := httptest.NewRecorder()
+	h.HandleRedirect("abc123", rr, req)
+	if rr.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302", rr.Code)
+	}
+	if got := rr.Header().Get("Location"); got != "https://ios.example.com" {
+		t.Fatalf("Location = %q, want https://ios.example.com", got)
+	}
+}
+
+// mapCache is a trivial in-memory cache.Cache double for redirect tests.
+type mapCache struct {
+	data map[string]string
+}
+
+func (c *mapCache) Get(key string) (string, bool) {
+	v, ok := c.data[key]
+	return v, ok
+}
+
+func (c *mapCache) Set(key, value string, ttl int64) error {
+	if c.data == nil {
+		c.data = map[string]string{}
+	}
+	c.data[key] = value
+	return nil
+}
+
+func (c *mapCache) Delete(key string) error {
+	delete(c.data, key)
+	return nil
 }
 
 // TestHandleListLinksAuthAndScoping proves GET /api/links is NOT public anymore:

@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"jejak/internal/auth"
-	"jejak/internal/middleware"
 	"jejak/internal/db"
+	"jejak/internal/middleware"
 )
 
 // fakeStore is a minimal in-memory ShardStore for handler tests. Only the
@@ -41,6 +41,8 @@ type fakeStore struct {
 	featureCalls []featureCall
 	// featureErr returns ErrNoRows-shaped failures like the real store when set.
 	featureErr error
+	// activeCalls records every SetLinkActive call.
+	activeCalls []activeCall
 	// keyList is returned by ListAPIKeys.
 	keyList []db.APIKey
 	// keyByHash is returned by GetAPIKeyByHash.
@@ -74,6 +76,11 @@ type updateCall struct {
 type featureCall struct {
 	code     string
 	featured bool
+}
+
+type activeCall struct {
+	code   string
+	active bool
 }
 
 type profileCall struct {
@@ -138,7 +145,7 @@ func (f *fakeStore) ListLinksByCreatorPrimary(creatorID int64) ([]db.Link, error
 	return f.ListLinksByCreator(creatorID)
 }
 func (f *fakeStore) ReorderLinks(creatorID int64, order []string) error { return nil }
-func (f *fakeStore) LogClick(e	db.ClickEvent) error { return nil }
+func (f *fakeStore) LogClick(e db.ClickEvent) error                     { return nil }
 func (f *fakeStore) ClaimLinks(creatorID int64, codes []string) (int64, error) {
 	f.claimCodes = append(f.claimCodes, codes...)
 	return f.claimResult, nil
@@ -155,7 +162,13 @@ func (f *fakeStore) GetLink(shortCode string) (db.Link, error) {
 }
 
 func (f *fakeStore) DeleteLink(creatorID int64, shortCode string) error { return nil }
-func (f *fakeStore) SetLinkActive(creatorID int64, shortCode string, active bool) error { return nil }
+func (f *fakeStore) SetLinkActive(creatorID int64, shortCode string, active bool) error {
+	if !hasCode(f.created, shortCode) {
+		return sql.ErrNoRows
+	}
+	f.activeCalls = append(f.activeCalls, activeCall{code: shortCode, active: active})
+	return nil
+}
 func (f *fakeStore) UpdateLink(creatorID int64, shortCode, deviceRulesJSON, tagsJSON string) error {
 	if f.updateErr != nil {
 		return f.updateErr

@@ -59,12 +59,11 @@ export default function Navbar() {
     }
     localStorage.removeItem("jejak_unclaimed_links");
     if (pending.length === 0) {
+      router.push("/dashboard");
       return;
     }
     try {
       const res = await fetch("/api/links/claim", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ short_codes: pending }),
       });
       const text = await res.text();
@@ -83,6 +82,7 @@ export default function Navbar() {
     } catch {
       // klaim gagal diam-diam: key sudah dibersihkan, tidak dicoba ulang
     }
+    router.push("/dashboard");
   }
 
   async function loadProfile() {
@@ -224,7 +224,7 @@ export default function Navbar() {
           <div className="flex items-center gap-4 text-sm">
             {username === null ? (
               <Link
-                href="/"
+                href="/app"
                 className={`${actionPill} px-4 py-1 font-medium transition-colors duration-150`}
               >
                 + Link Baru
@@ -235,12 +235,12 @@ export default function Navbar() {
                     motion.span layoutId=navbar-active di belakang item aktif,
                     transisi spring redam 300/30 — konsisten dengan dashboard. */}
                 <Link
-                  href="/"
+                  href="/app"
                   className={`relative flex items-center gap-1 rounded-full px-4 py-1 text-sm transition-colors duration-200 ${
-                    pathname === "/" ? "font-bold text-ink" : capsuleInactive
+                    pathname === "/app" ? "font-bold text-ink" : capsuleInactive
                   }${capsuleHover}`}
                 >
-                  {pathname === "/" && (
+                  {pathname === "/app" && (
                     <motion.span
                       layoutId="navbar-active"
                       transition={{ type: "spring", stiffness: 300, damping: 30 }}

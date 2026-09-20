@@ -118,16 +118,18 @@ func (h *Handler) HandleReorderLinks(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleUpdateLink edits an owned link (PUT /api/links/{short_code}):
-// device_rules (Smart Link), tags, dan is_featured (link unggulan) dalam 1
-// endpoint. Setiap field opsional (pointer) — field yang tidak dikirim TIDAK
-// disentuh, supaya toggle "unggulan" dari dashboard tidak menghapus
-// device_rules/tags yang ada. Field yang dikirim = full-replace (mirip dengan
-// HandleUpdateMyProfile). Auth wajib; scope ke baris milik sendiri
-// (WHERE creator_id) — link orang lain / kode kosong → 404 (bukan 403, jangan
-// bocorkan keberadaan short-code orang). URL rules divalidasi http(s) kalau
-// diisi; kalau kosong = fallback ke original_url. Featured di-set lewat
-// transaksi radio di store (1 per creator). Cache di-invalidate sesudah update
-// supaya redirect berikutnya baca device_rules terbaru.
+// device_rules (Smart Link), tags, is_featured (link unggulan), dan is_active
+// (disable/enable) dalam 1 endpoint. Setiap field opsional (pointer) — field
+// yang tidak dikirim TIDAK disentuh, supaya toggle "unggulan" / "nonaktifkan"
+// dari dashboard tidak menghapus device_rules/tags yang ada. Field yang
+// dikirim = full-replace (mirip dengan HandleUpdateMyProfile). Auth wajib;
+// scope ke baris milik sendiri (WHERE creator_id) — link orang lain / kode
+// kosong → 404 (bukan 403, jangan bocorkan keberadaan short-code orang). URL
+// rules divalidasi http(s) kalau diisi; kalau kosong = fallback ke
+// original_url. Featured di-set lewat transaksi radio di store (1 per
+// creator). is_active=off menonaktifkan URL publik (redirect menjawab 410,
+// lihat HandleRedirect — Fase 13 lifecycle). Cache di-invalidate sesudah
+// update supaya redirect berikutnya baca device_rules/is_active terbaru.
 func (h *Handler) HandleUpdateLink(shortCode string, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -143,12 +145,13 @@ func (h *Handler) HandleUpdateLink(shortCode string, w http.ResponseWriter, r *h
 		DeviceRules *map[string]string `json:"device_rules"`
 		Tags        *[]string          `json:"tags"`
 		IsFeatured  *bool              `json:"is_featured"`
+		IsActive    *bool              `json:"is_active"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-	if req.DeviceRules == nil && req.Tags == nil && req.IsFeatured == nil {
+	if req.DeviceRules == nil && req.Tags == nil && req.IsFeatured == nil && req.IsActive == nil {
 		http.Error(w, "Nothing to update", http.StatusBadRequest)
 		return
 	}
@@ -208,6 +211,22 @@ func (h *Handler) HandleUpdateLink(shortCode string, w http.ResponseWriter, r *h
 				return
 			}
 			h.Logger.Printf("SetFeaturedLink failed for %q: %v", shortCode, err)
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Toggle is_active (disable/enable) bukan bagian dari UpdateLink: kolom
+	// terpisah dan tidak boleh menimpa rules/tags. Endpoint publik redirect
+	// akan menjawab 410 untuk link yang di-disable (lihat HandleRedirect);
+	// dashboard tetap menampilkannya supaya bisa di hidupkan kembali.
+	if req.IsActive != nil {
+		if err := h.Store.SetLinkActive(*creatorID, shortCode, *req.IsActive); err != nil {
+			if err == sql.ErrNoRows {
+				http.Error(w, "Unknown short code or not yours", http.StatusNotFound)
+				return
+			}
+			h.Logger.Printf("SetLinkActive failed for %q: %v", shortCode, err)
 			http.Error(w, "Database error", http.StatusInternalServerError)
 			return
 		}

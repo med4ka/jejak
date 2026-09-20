@@ -15,9 +15,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"jejak/internal/db"
 	"jejak/internal/middleware"
 	"jejak/internal/ratelimit"
-	"jejak/internal/db"
 	"jejak/internal/shortener"
 )
 
@@ -206,9 +206,16 @@ func detectDevice(ua string) string {
 // redirectTarget is what the cache stores for a short code: the default URL
 // plus the Smart Link device rules. JSON (not a bare string) so the redirect
 // path can route per device WITHOUT an extra DB read on a cache hit.
+// Disabled di-omitempty (absent = aktif): server ini TIDAK pernah menulis
+// target disabled (link yang di-disable short-circuit ke 410 SEBELUM cache),
+// tapi field ini ada supaya entri cache ber-nilai disabled yang ditulis
+// writer lain / tool eksternal tetap dihormati (tidak redirect) — dan juga
+// forward-compat untuk is_active di payload cache. Backward-compat: entri
+// lama tanpa field ini otomatis = aktif.
 type redirectTarget struct {
 	URL         string            `json:"url"`
 	DeviceRules map[string]string `json:"device_rules,omitempty"`
+	Disabled    bool              `json:"disabled,omitempty"`
 }
 
 // parseTarget reads a cache value back into a redirectTarget. Old cache
@@ -253,6 +260,14 @@ func (h *Handler) HandleRedirect(shortCode string, w http.ResponseWriter, r *htt
 	if h.Cache != nil {
 		if cached, found := h.Cache.Get(shortCode); found {
 			if target, ok := parseTarget(cached); ok {
+				// Entri cache yang menandai link disabled TIDAK boleh redirect.
+				// Evict supaya request berikutnya baca ulang DB — link yang
+				// di-hidupkan kembali langsung aktif, tidak nyangkut TTL 300s.
+				if target.Disabled {
+					h.Cache.Delete(shortCode)
+					http.Error(w, "Link disabled", http.StatusGone)
+					return
+				}
 				h.logClickAsync(shortCode, r)
 				http.Redirect(w, r, target.pickURL(device), http.StatusFound)
 				return
@@ -270,6 +285,17 @@ func (h *Handler) HandleRedirect(shortCode string, w http.ResponseWriter, r *htt
 		http.Error(w, "URL not found", http.StatusNotFound)
 		return
 	}
+
+	// Fase 13 lifecycle: link yang di-disable (is_active=false) tidak boleh
+	// redirect — jawab 410 Gone supaya link "hilang" dari publik tapi tetap
+	// terlihat di dashboard pemilik (yang bisa menyalakannya lagi). Dicek
+	// SEBELUM menulis cache: link disabled tidak pernah masuk cache sebagai
+	// target aktif, jadi tallied click tidak bisa masuk lewat jalur cache.
+	if !link.IsActive {
+		http.Error(w, "Link disabled", http.StatusGone)
+		return
+	}
+
 	target := redirectTarget{URL: link.OriginalURL, DeviceRules: link.DeviceRules}
 
 	// Populate cache for future requests (nil-safe).
@@ -316,11 +342,11 @@ func (h *Handler) logClickAsync(shortCode string, r *http.Request) {
 	// Create click event message — field diisi LENGKAP supaya worker tidak
 	// perlu menebak/ulang-memparsing (fire-and-forget yang tetap akurat).
 	event := map[string]string{
-		"short_code":     shortCode,
-		"referrer":       r.Referer(),
+		"short_code":      shortCode,
+		"referrer":        r.Referer(),
 		"referrer_domain": referrerDomain(r.Referer()),
-		"is_unique":      strconv.FormatBool(h.isUniqueClick(shortCode, r)),
-		"clicked_at":     time.Now().UTC().Format(time.RFC3339),
+		"is_unique":       strconv.FormatBool(h.isUniqueClick(shortCode, r)),
+		"clicked_at":      time.Now().UTC().Format(time.RFC3339),
 	}
 
 	jsonData, err := json.Marshal(event)
@@ -343,7 +369,7 @@ func (h *Handler) logClickAsync(shortCode string, r *http.Request) {
 // semuanya harus masuk bucket yang sama, bukan 3 bucket terpisah.
 // Trade-off: Non-URL referrer (misal "android-app://x") dikembalikan apa
 // adanya via callfresh parse; corrupt dianggap kosong (referrer_domain NULL
-// di DB, tidak menyumbang breakdown). 
+// di DB, tidak menyumbang breakdown).
 func referrerDomain(ref string) string {
 	if strings.TrimSpace(ref) == "" {
 		return ""
@@ -370,8 +396,8 @@ func (h *Handler) clickFingerprint(r *http.Request) string {
 // shortCode within the last 24h (bit.ly-style unique window).
 //
 //	Mode Redis set (produksi/async): SETNX atomik key = unique.
-//	
-//	
+//
+//
 //	Mode Redis nil (baseline): pakai map in-memory (uniqueSeen) yang dijaga
 //	Handler. Ini mode Fase 14 baseline: unik tetap terhitung akurat dalam
 //	proses single-worker (bukan cuma di async). Trade-off: state hidup di

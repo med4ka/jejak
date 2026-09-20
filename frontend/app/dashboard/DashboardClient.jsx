@@ -10,6 +10,7 @@ import { CSS } from "@dnd-kit/utilities";
 import QrModal from "../components/QrModal";
 import EditLinkModal from "../components/EditLinkModal";
 import ClicksChart from "../components/ClicksChart";
+import ShortenForm from "../components/ShortenForm";
 import CopyButton from "../components/CopyButton";
 import { THEMES, themeStyles } from "../../lib/themes";
 import ThemeBackdrop from "../components/ThemeBackdrop";
@@ -20,7 +21,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081";
 // (bukan seluruh baris) supaya tombol QR/salin/edit tetap bisa di-tap normal.
 // dragDisabled=true saat filter tag aktif (reorder parsial akan menabrak
 // position baris yang tersembunyi — lihat onDragEnd).
-function SortableLinkRow({ link, onQr, onEdit, onFeature, dragDisabled, st }) {
+function SortableLinkRow({ link, onQr, onEdit, onFeature, onToggleActive, dragDisabled, st }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: link.short_code,
     disabled: dragDisabled,
@@ -29,7 +30,7 @@ function SortableLinkRow({ link, onQr, onEdit, onFeature, dragDisabled, st }) {
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
-      className={`flex items-center justify-between gap-3 ${st.radius} ${st.borderW} ${st.border} ${st.card} px-4 py-2.5 transition-colors duration-150 hover:opacity-90 ${isDragging ? "opacity-60" : ""}`}
+      className={`flex items-center justify-between gap-3 ${st.radius} ${st.borderW} ${st.border} ${st.card} px-4 py-2.5 transition-colors duration-150 hover:opacity-90 ${isDragging ? "opacity-60" : ""} ${!link.is_active ? "opacity-60" : ""}`}
     >
       <span
         {...attributes}
@@ -80,12 +81,18 @@ function SortableLinkRow({ link, onQr, onEdit, onFeature, dragDisabled, st }) {
         >
           QR
         </button>
+        <button
+          onClick={onToggleActive}
+          title={link.is_active ? "Nonaktifkan link (redirect jadi 410, tetap tampil di dashboard)" : "Aktifkan kembali (redirect jalan lagi)"}
+          aria-pressed={!!link.is_active}
+          className={`shrink-0 rounded-full ${st.borderW} ${st.border} ${st.card} px-3 py-0.5 text-xs font-bold transition-colors duration-150 hover:opacity-90`}
+        >
+          {link.is_active ? "Aktif" : "Nonaktif"}
+        </button>
       </div>
     </div>
   );
 }
-
-const input = ""; // legacy — dihapus segera, sekarang pakai inputThemed di dalam komponen
 
 // Halaman dashboard kreator (login wajib): form edit profil
 // (display_name, bio, avatar_url, socials) — pola fetch sama seperti AuthModal:
@@ -358,6 +365,34 @@ export default function DashboardClient() {
         throw new Error("Gagal menyimpan unggulan");
       }
       setOrderMsg(featured ? "Unggulan disimpan." : "Unggulan dihapus.");
+    } catch {
+      loadProfile();
+      setOrderMsg("Gagal — perubahan dibatalkan.");
+    }
+  }
+
+  // Toggle aktif/nonaktif via PUT /api/links/{short_code} {is_active: bool}.
+  // Mirip toggleFeature: optimistic dulu, reload state server kalau gagal.
+  // Link nonaktif tetap tampil di dashboard (pemilik harus bisa menyalakan
+  // lagi) tapi URL publiknya berhenti redirect (410) — lihat HandleRedirect.
+  async function toggleActive(link) {
+    const active = !link.is_active;
+    setLinks((prev) =>
+      prev.map((x) =>
+        x.short_code === link.short_code ? { ...x, is_active: active } : x
+      )
+    );
+    setOrderMsg("Menyimpan status...");
+    try {
+      const res = await fetch(`/api/links/${link.short_code}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_active: active }),
+      });
+      if (!res.ok) {
+        throw new Error("Gagal mengubah status");
+      }
+      setOrderMsg(active ? "Link aktif kembali." : "Link dinonaktifkan.");
     } catch {
       loadProfile();
       setOrderMsg("Gagal — perubahan dibatalkan.");
@@ -736,6 +771,12 @@ export default function DashboardClient() {
       )}
       {tab === "links" && (
       <>
+      {/* TAHAP D: form shorten inline di puncak tab — user login bisa bikin
+          link baru TANPA keluar dashboard. `st` diteruskan biar form ikut
+          token tema dashboard yang aktif; onSuccess memanggil loadProfile()
+          (fungsi load link yang sudah ada) supaya link baru langsung muncul
+          di list bawahnya TANPA reload halaman penuh. */}
+      <ShortenForm st={st} onSuccess={() => loadProfile()} />
       <ClicksChart theme={theme} st={st} />
       {links.length === 0 && bio === "" && apiKeys.length === 0 && (
         <div className={`mt-4 ${st.radius} ${st.borderW} ${st.border} ${st.card} px-4 py-4`}>
@@ -743,10 +784,14 @@ export default function DashboardClient() {
           <ol className="mt-3 flex flex-col gap-2 text-sm">
             <li>
               1.{" "}
-              <Link href="/" className="font-medium text-flash-coral underline transition-colors duration-150 hover:text-ink">
-                Buat short-link pertamamu
-              </Link>{" "}
-              di halaman utama.
+              <button
+                type="button"
+                onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+                className="font-medium text-flash-coral underline transition-colors duration-150 hover:text-ink"
+              >
+                ↑ Buat short-link pertamamu di form atas
+              </button>
+              .
             </li>
             <li>
               2.{" "}
@@ -765,12 +810,6 @@ export default function DashboardClient() {
       <section className="mt-4">
         <div className="flex items-center justify-between gap-3">
           <h2 className={`${st.headingFont} text-lg font-bold`}>Link saya</h2>
-          <Link
-            href="/"
-            className={`rounded-full ${st.borderW} ${st.border} ${st.card} px-4 py-1.5 text-sm font-bold transition-colors duration-150 hover:opacity-90`}
-          >
-            + Buat link baru
-          </Link>
         </div>
         {allTags.length > 0 && (
           <div className="mt-2 flex items-center gap-2 text-sm">
@@ -803,6 +842,7 @@ export default function DashboardClient() {
                     onQr={() => setQrCode(l.short_code)}
                     onEdit={() => setEditing(l)}
                     onFeature={() => toggleFeature(l)}
+                    onToggleActive={() => toggleActive(l)}
                     dragDisabled={tagFilter !== ""}
                     st={st}
                   />

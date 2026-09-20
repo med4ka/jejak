@@ -232,3 +232,59 @@ func TestHandleUpdateLinkFeatured(t *testing.T) {
 		}
 	})
 }
+
+// TestHandleUpdateLinkIsActive covers the Fase 13 disable/enable toggle:
+// {is_active} alone must reach SetLinkActive, must NOT touch UpdateLink
+// (rules/tags untouched), and must be 404 for links the caller doesn't own.
+func TestHandleUpdateLinkIsActive(t *testing.T) {
+	t.Run("disable-false-calls-set-active", func(t *testing.T) {
+		s := &fakeStore{created: []createCall{{code: "mine01"}}}
+		h := newTestHandler(s)
+		h.Auth = auth.NewMemoryStore()
+
+		req := authedPut(s, h, 42, "/api/links/mine01", `{"is_active":false}`)
+		rr := httptest.NewRecorder()
+		h.HandleUpdateLink("mine01", rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d (body %q), want 200", rr.Code, rr.Body.String())
+		}
+		if len(s.activeCalls) != 1 || s.activeCalls[0].code != "mine01" || s.activeCalls[0].active {
+			t.Errorf("SetLinkActive calls = %+v, want one active=false for mine01", s.activeCalls)
+		}
+		if len(s.updateCalls) != 0 {
+			t.Errorf("UpdateLink called %d times, want 0 (toggle tidak boleh menimpa rules/tags)", len(s.updateCalls))
+		}
+	})
+
+	t.Run("enable-true-reactivates", func(t *testing.T) {
+		s := &fakeStore{created: []createCall{{code: "mine01"}}}
+		h := newTestHandler(s)
+		h.Auth = auth.NewMemoryStore()
+
+		req := authedPut(s, h, 42, "/api/links/mine01", `{"is_active":true}`)
+		rr := httptest.NewRecorder()
+		h.HandleUpdateLink("mine01", rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d (body %q), want 200", rr.Code, rr.Body.String())
+		}
+		if len(s.activeCalls) != 1 || !s.activeCalls[0].active {
+			t.Errorf("SetLinkActive calls = %+v, want one active=true", s.activeCalls)
+		}
+	})
+
+	t.Run("not-owner-404", func(t *testing.T) {
+		s := &fakeStore{created: []createCall{{code: "mine01"}}}
+		h := newTestHandler(s)
+		h.Auth = auth.NewMemoryStore()
+
+		req := authedPut(s, h, 42, "/api/links/theirs9", `{"is_active":false}`)
+		rr := httptest.NewRecorder()
+		h.HandleUpdateLink("theirs9", rr, req)
+		if rr.Code != http.StatusNotFound {
+			t.Fatalf("status = %d (body %q), want 404", rr.Code, rr.Body.String())
+		}
+		if len(s.activeCalls) != 0 {
+			t.Errorf("SetLinkActive called for unowned code: %v", s.activeCalls)
+		}
+	})
+}

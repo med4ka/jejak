@@ -57,11 +57,11 @@ type Link struct {
 // (waktu klik asli), is_unique (visitor berbeda, window 24h ala bit.ly),
 // referrer_domain (host referrer tanpa path — dasar breakdown analitik).
 type ClickEvent struct {
-	ShortCode       string
-	Referrer        string
-	ReferrerDomain  string
-	IsUnique        bool
-	ClickedAt       time.Time
+	ShortCode      string
+	Referrer       string
+	ReferrerDomain string
+	IsUnique       bool
+	ClickedAt      time.Time
 }
 
 // parseRules decodes the device_rules JSONB document. Corrupt/empty/'{}' -> nil
@@ -290,7 +290,7 @@ func NewShardStore(numShards int) *shardStore {
 
 	for i := 0; i < numShards; i++ {
 		dsn := "postgres://jejak:password@postgres_shard" + string(rune('a'+i%26)) + ":5432/jejak?sslmode=disable"
-		db, err := sql.Open("postgres", dsn)
+		db, err := sql.Open("pgx", dsn)
 		if err != nil {
 			log.Printf("Warning: could not connect to shard %d: %v", i, err)
 			continue
@@ -1109,16 +1109,17 @@ func (s *SingleStore) SetLinkActive(creatorID int64, shortCode string, active bo
 	}
 	return nil
 }
-//	hash yang disimpan, key asli tidak pernah menyentuh database. Kalau
-//	database bocor, attacker tidak langsung bisa pakai key tersebut; format
-//	"jjk_" + 32 hex (128 bit) membuat brute-force SHA-256 mustahil secara
-//	komputasi (beda dari password user yang butuh bcrypt/argon2 karena
-//	entropy-nya rendah — key itu random penuh, jadi hash cepat cukup dan
-//	harga kecepatan itu wajib karena hash dicek di SETIAP request).
-//	Trade-off: SHA-256 bukan fungsi lambat (tidak seperti bcrypt), tapi itu
-//	disengaja: key 128-bit random tidak pernah bisa di-brute-force lewat
-//	offline hash, dan API key di-autentikasi per-request (bcrypt per-request
-//	= +100ms latensi per panggilan).
+
+// hash yang disimpan, key asli tidak pernah menyentuh database. Kalau
+// database bocor, attacker tidak langsung bisa pakai key tersebut; format
+// "jjk_" + 32 hex (128 bit) membuat brute-force SHA-256 mustahil secara
+// komputasi (beda dari password user yang butuh bcrypt/argon2 karena
+// entropy-nya rendah — key itu random penuh, jadi hash cepat cukup dan
+// harga kecepatan itu wajib karena hash dicek di SETIAP request).
+// Trade-off: SHA-256 bukan fungsi lambat (tidak seperti bcrypt), tapi itu
+// disengaja: key 128-bit random tidak pernah bisa di-brute-force lewat
+// offline hash, dan API key di-autentikasi per-request (bcrypt per-request
+// = +100ms latensi per panggilan).
 func (s *SingleStore) StoreAPIKey(creatorID int64, keyHash, label string) (int64, error) {
 	var id int64
 	err := s.primary.QueryRow(
@@ -1259,6 +1260,7 @@ func FillLast30Days(counts map[string]int64, today time.Time) []DayCount {
 //	di tengah = event hilang + warning log (tidak ada retry/antrian mati).
 //	Alternatif: Pisah jadi 2 operasi tanpa transaction (risiko skew) atau
 //	hitung counter dari agregat click_events saat dibaca (mahal, anti-Fase 2).
+//
 // LogClick writes one click: INSERT click_events (with is_unique flag +
 // referrer_domain) + increment click_count (dan unique_click_count bila
 // is_unique) dalam 1 transaction — atomic seperti Fase 2 (dua angka ini

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"log"
 	"net/http"
 	"os"
@@ -10,11 +11,12 @@ import (
 
 	"jejak/internal/auth"
 	"jejak/internal/cache"
-	"jejak/internal/handler"
-	"jejak/internal/middleware"
-	"jejak/internal/ratelimit"
 	"jejak/internal/db"
 	"jejak/internal/env"
+	"jejak/internal/handler"
+	"jejak/internal/middleware"
+	"jejak/internal/migrate"
+	"jejak/internal/ratelimit"
 )
 
 // LEARN:
@@ -36,6 +38,22 @@ func main() {
 	dbURL := env.Get("DATABASE_URL", "postgres://jejak:password@localhost:5432/jejak?sslmode=disable")
 	replicaURL := os.Getenv("DATABASE_REPLICA_URL") // kosong = tanpa replica
 	redisURL := os.Getenv("REDIS_URL")              // kosong = tanpa cache/queue
+
+	// Auto-migrate PRIMARY sebelum store dibuka (lihat LEARN di
+	// internal/migrate — ini menutup bug berulang "migrasi lupa dijalankan
+	// manual" yang pernah bikin redirect 404 & dashboard 500 diam-diam).
+	// PRINSIP: Hanya primary (DATABASE_URL). Replica TIDAK di-migrate
+	// otomatis — sinkronisasi replica tetap manual (lihat LEARN di migrate.go).
+	mgDB, err := sql.Open("pgx", dbURL)
+	if err != nil {
+		log.Fatal("Failed to open connection for migrate:", err)
+	}
+	if err := migrate.Run(mgDB, log.Default()); err != nil {
+		log.Fatal("Auto-migrate gagal:", err)
+	}
+	if err := mgDB.Close(); err != nil {
+		log.Printf("Warning: close migrate connection: %v", err)
+	}
 
 	var store db.ShardStore
 	switch mode {
@@ -196,14 +214,19 @@ func main() {
 
 	mux.HandleFunc("GET /r/", func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
-		if len(path) > 3 {
-			shortCode := path[3:] // Remove /r/
-			if suffix := "/clicks"; len(shortCode) > len(suffix) && shortCode[len(shortCode)-len(suffix):] == suffix {
-				shortCode = shortCode[:len(shortCode)-len(suffix)]
-				h.HandleGetClickCount(shortCode, w, r)
-			} else {
-				h.HandleRedirect(shortCode, w, r)
-			}
+		if len(path) <= 3 {
+			// GET /r/ tanpa short code: bukan link. Sebelumnya dijawab 200
+			// dengan body kosong (sering dipukul crawler/probe GET "/r/").
+			// Dipastikan 404 supaya konsisten dengan unknown code.
+			http.NotFound(w, r)
+			return
+		}
+		shortCode := path[3:] // Remove /r/
+		if suffix := "/clicks"; len(shortCode) > len(suffix) && shortCode[len(shortCode)-len(suffix):] == suffix {
+			shortCode = shortCode[:len(shortCode)-len(suffix)]
+			h.HandleGetClickCount(shortCode, w, r)
+		} else {
+			h.HandleRedirect(shortCode, w, r)
 		}
 	})
 
