@@ -8,5 +8,9 @@ export const metadata = {
 };
 
 export default function DashboardPage() {
-  return <DashboardClient />;
+  return (
+    <div className="mx-auto w-full max-w-2xl px-4 pb-16 pt-24">
+      <DashboardClient />
+    </div>
+  );
 }

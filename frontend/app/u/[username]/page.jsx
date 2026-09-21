@@ -71,7 +71,7 @@ export default async function CreatorPage({ params }) {
   const t = themeStyles(profile.theme);
 
   return (
-    <main>
+    <main className="mx-auto w-full max-w-2xl px-4 pb-16 pt-28">
       {/* Header profil: kartu terang + caption tulisan tangan (§3, lokasi ke-2). */}
       <section className={`${t.radiusLarge} ${t.borderW} p-6 ${t.border} ${t.card}`}>
         <div className="flex items-center gap-4">

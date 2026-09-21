@@ -25,9 +25,7 @@ export default function RootLayout({ children }) {
     <html lang="id" className={`${display.variable} ${blackhead.variable} ${body.variable} ${mono.variable} ${caption.variable}`}>
       <body className="min-h-screen bg-print-white font-body text-ink">
         <Navbar />
-        <div className="mx-auto max-w-2xl px-4 pb-16 pt-28">
-          <PageTransition>{children}</PageTransition>
-        </div>
+      <div>{children}</div>
       </body>
     </html>
   );

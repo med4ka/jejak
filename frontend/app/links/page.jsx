@@ -17,8 +17,10 @@ export default function LinksRedirect() {
   }, [router]);
 
   return (
-    <main>
-      <p className="text-sm text-muted">Mengalihkan...</p>
-    </main>
+    <div className="mx-auto w-full max-w-2xl px-4 pb-16 pt-24">
+      <main>
+        <p className="text-sm text-muted">Mengalihkan...</p>
+      </main>
+    </div>
   );
 }

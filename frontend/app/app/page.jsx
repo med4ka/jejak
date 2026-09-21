@@ -56,7 +56,8 @@ export default function AppHome() {
   }, []);
 
   return (
-    <main className={st.text}>
+    <main className={`mx-auto w-full max-w-6xl px-4 pb-16 pt-14 sm:px-6 lg:px-8 ${st.text}`}>
+
       <ThemeBackdrop theme={theme} />
       <p className={`inline-block ${st.radiusFull} ${st.borderW} ${st.border} ${st.chip} px-3 py-1 font-mono text-xs font-bold uppercase tracking-[0.15em] ${st.textMuted}`}>
         Link-in-bio untuk kreator
