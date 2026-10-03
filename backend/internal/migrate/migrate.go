@@ -1,50 +1,49 @@
-// Package migrate menjalankan file migrasi SQL (goose-style, marker
-// "-- +goose Up"/"-- +goose Down") secara otomatis saat server boot,
-// terhadap database PRIMARY saja.
+// Package migrate runs the SQL migration files (goose-style, markers
+// "-- +goose Up"/"-- +goose Down") automatically at server boot, against the
+// PRIMARY database only.
 //
-// LEARN:
-//
-//	Kenapa ada auto-migrate: Sejak Fase 1 migrasi HANYA bisa jalan manual
-//	(psql/goose). Dampak nyata — riwayat bug berulang yang nyaris tidak
-//	terdeteksi:
-//	  * DB `jejak` lokal tertinggal migrasi 12 & 13 (kolom is_active,
-//	    unique_click_count, dsb. belum ada). Konsekuensinya TIDAK muncul di
-//	    INSERT/shorten (yang cuma kolom lama) tapi di SELECT/redirect:
-//	      - GET /r/{code} SELECT menyebut is_active → ERROR column does not
-//	        exist → semua link yang baru dibuat malah 404.
-//	      - GET /api/profile (ListLinksByCreatorPrimary) SELECT menyebut
-//	        is_active → error yang sama → 500 "Database error".
-//	    Ini jebakan asimtomatik: aplikasi "jalan" (register/login/shorten
-//	    ok) tapi fitur inti (redirect hidup + dashboard) mati — persis
-//	    yang nyaris lolos smoke test kemarin.
-//	Prinsip auto-migrate:
-//	  * Hanya PRIMARY (DATABASE_URL) yang dimigrate otomatis. REPLICA
-//	    TIDAK IKUT — sinkronisasi replica tetap manual, sesuai prinsip
-//	    project (lihat README: replica di-sync lewat migrasi terpisah).
-//	    Auto-migrate ke replica bisa bikin replica melenceng dari
-//	    konfigurasi manual yang dikelola operator.
-//	  * Aman dijalankan ulang (idempoten): setiap versi dicatat di tabel
-//	    schema_migrations, jadi boot berikutnya me-skip yang sudah applied.
-//	  * Toleran "already exists": file migrasi kami sebagian TIDAK
-//	    idempoten (mis. migrasi 13 pakai ADD COLUMN tanpa IF NOT EXISTS
-//	    SEDANGKAN 01-12 semuanya IF NOT EXISTS/IF EXISTS). Kalau DB sudah
-//	    punya kolom (mis. sudah pernah dimigrate manual ke 13 lalu kita
-//	    aktifkan auto-migrate), statement ADD COLUMN akan gagal
-//	    duplicate_column — kita anggap itu "sudah ada" dan lanjut, karena
-//	    tujuannya cuma memastikan kolom ADA, bukan mengulang DELETE yang
-//	    berbahaya. Trade-off: ini berarti migrasi NON-idempoten baru ke
-//	    depan dihimbau memakai IF NOT EXISTS supaya auto-migrate tetap
-//	    stabil; dokumentasikan itu di README.
-//	Alternatif yang dipertimbangkan: tarik dependency goose/pressly.
-//	  - Batal: project ini sengaja dependency-free di pilihan non-sepele
-//	    (env loader ditulis tangan, lihat internal/env; embed di sini juga
-//	    ditulis tangan). Satu dependency eksternal untuk "jalankan N file
-//	    SQL + catat versi" tidak sebanding dengan ~80 baris sendiri yang
-//	    eksplisit dan bisa dibaca.
-//	Alternatif yang dipertimbangkan (2): baca file dari path disk saat boot.
-//	  - Batal: rapuh terhadap working-directory (jebakan yang sama dengan
-//	    .env — dan pernah bikin load test tidak konsisten). File migrasi
-//	    di-embed (db/migrations/embed.go) sehingga binary mandiri.
+// Auto-migrate exists because since Fase 1 migrations could only be applied
+// manually (psql/goose), which left a trail of recurring bugs that were almost
+// undetectable:
+//   - The local `jejak` database lagged behind migrations 12 and 13 (columns
+//     such as is_active and unique_click_count were missing). The consequence
+//     did not surface in INSERT/shorten (old columns only) but in
+//     SELECT/redirect:
+//   - GET /r/{code} selects is_active -> ERROR column does not exist ->
+//     every newly created link answers 404.
+//   - GET /api/profile (ListLinksByCreatorPrimary) selects is_active ->
+//     the same error -> 500 "Database error".
+//     This is an asymptomatic trap: the application "works" (register/login/
+//     shorten OK) while the core features (live redirect + dashboard) are
+//     dead - exactly what a smoke test nearly missed.
+//     Principles of auto-migrate:
+//   - Only the PRIMARY (DATABASE_URL) is migrated automatically. The REPLICA
+//     IS NOT - replica synchronization stays manual, per the project rule
+//     (see README: the replica is synced through separate migrations).
+//     Auto-migrating the replica could pull it away from the operator's
+//     manual configuration.
+//   - Safe to re-run (idempotent): every version is recorded in the
+//     schema_migrations table, so the next boot skips applied versions.
+//   - Tolerates "already exists": some of our migration files are not
+//     idempotent (migration 13 uses ADD COLUMN without IF NOT EXISTS whereas
+//     01-12 all use IF NOT EXISTS/IF EXISTS). If the database already has the
+//     column (e.g. it was migrated manually to 13 before auto-migrate was
+//     enabled), the ADD COLUMN statement fails with duplicate_column - that
+//     is treated as "already present" and skipped, because the only goal is
+//     to ensure the column EXISTS, never to repeat a dangerous DELETE.
+//     Trade-off: new non-idempotent migrations are expected to use IF NOT
+//     EXISTS so that auto-migrate stays stable; that is documented in README.
+//     Alternative considered: pulling in the goose/pressly dependency.
+//   - Rejected: the project deliberately avoids external dependencies for
+//     non-trivial choices (the env loader is hand-written, see internal/env;
+//     the embed here is hand-written too). One external dependency to "run N
+//     SQL files and record versions" is not worth ~80 explicit, readable
+//     lines of our own.
+//     Alternative considered (2): reading the migration files from a disk path
+//     at boot.
+//   - Rejected: fragile with respect to the working directory (the same trap
+//     as .env - which once made load tests inconsistent). The migration files
+//     are embedded (db/migrations/embed.go) so the binary is self-contained.
 package migrate
 
 import (
@@ -61,9 +60,15 @@ import (
 	"jejak/db/migrations"
 )
 
-// Run memastikan semua migrasi tersedia di DB primary. idempoten; aman
-// dipanggil tiap boot. logger dipakai untuk pesan — panggil hanya untuk
-// primary (TIDAK untuk replica).
+// Run makes sure every migration is present in the primary DB. It is
+// idempotent and safe to call on each boot. logger carries the messages - call
+// it for the PRIMARY only (NEVER for the replica).
+// Returns a wrapped error (fmt.Errorf with %w, prefixed "migrate: ..." or
+// "migrate <file>: ...") when the schema_migrations bootstrap, the version
+// read, the embedded file listing, statement parsing, or a migration
+// execution fails; cmd/server treats that as fatal and refuses to start.
+// Already-applied versions and tolerated duplicate_column retries (see the
+// package comment) are skips, not errors.
 func Run(db *sql.DB, logger *log.Logger) error {
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
 		version    VARCHAR(255) PRIMARY KEY,
@@ -110,13 +115,13 @@ func Run(db *sql.DB, logger *log.Logger) error {
 		executed := 0
 		for _, stmt := range stmts {
 			if _, err := db.Exec(stmt); err != nil {
-				// Toleransi "sudah ada" supaya DB yang sudah dimigrate manual
-				// ke versi non-idempoten (mis. 13) tidak gagal boot. lihat
-				// LEARN di atas.
+				// Tolerate "already exists" so a database that was migrated
+				// manually to a non-idempotent version (e.g. 13) still boots;
+				// see the package comment above.
 				if !isAlreadyExists(err) {
 					return fmt.Errorf("migrate %s: %w\nSQL: %s", name, err, stmt)
 				}
-				logger.Printf("[migrate] %s: kolom/tabel sudah ada — dilewati (%s)", name, stmt)
+				logger.Printf("[migrate] %s: kolom/tabel sudah ada: dilewati (%s)", name, stmt)
 				continue
 			}
 			executed++
@@ -132,9 +137,9 @@ func Run(db *sql.DB, logger *log.Logger) error {
 	return nil
 }
 
-// upStatements mengekstrak statement SQL dari bagian "Up" sebuah file
-// migrasi (antara marker "-- +goose Up" dan "-- +goose Down" atau akhir
-// file), membuang baris komentar dan marker.
+// upStatements extracts the SQL statements from the "Up" section of a
+// migration file (between the "-- +goose Up" and "-- +goose Down" markers, or
+// the end of the file), dropping comment lines and markers.
 func upStatements(name string) ([]string, error) {
 	data, err := migrations.FS.ReadFile(name)
 	if err != nil {
@@ -170,8 +175,8 @@ func upBody(content string) string {
 	return body
 }
 
-// splitStatements memecah blok SQL per-statement pada ";", dengan mengabaikan
-// ; yang ada di dalam string literal '...' dan di dalam baris komentar.
+// splitStatements splits an SQL block into statements on ";", ignoring
+// semicolons that appear inside '...' string literals and inside comment lines.
 func splitStatements(s string) []string {
 	var out []string
 	var cur strings.Builder
@@ -180,10 +185,9 @@ func splitStatements(s string) []string {
 		r := s[i]
 		switch {
 		case inComment:
-			// Abaikan seluruh isi baris komentar "..." sampai newline.
-			// Mulai dari "--" dan berakhir di '\n'. Kalimat Indonesia di
-			// komentar (mis. "kalau device tidak match...") tidak boleh
-			// ikut dieksekusi sebagai SQL.
+			// Ignore the entire comment line up to the newline: it starts at
+			// "--" and ends at '\n'. Comment prose (e.g. "if the device does
+			// not match...") must never be executed as SQL.
 			if r == '\n' {
 				inComment = false
 				cur.WriteByte(r)
@@ -194,8 +198,8 @@ func splitStatements(s string) []string {
 				inStr = false
 			}
 		case r == '-' && i+1 < len(s) && s[i+1] == '-':
-			// "--" memulai komentar baris: lewati sampai akhir baris,
-			// TIDAK ikut ditulis ke statement.
+			// "--" starts a line comment: skip to the end of the line and
+			// never write it into the statement.
 			inComment = true
 			i++
 		case r == '\'':
@@ -216,8 +220,9 @@ func splitStatements(s string) []string {
 	return out
 }
 
-// isAlreadyExists mengenali error duplicate (kolom/tabel/index/database)
-// Postgres agar non-idempoten migration tetap aman dijalankan ulang.
+// isAlreadyExists reports whether err is a Postgres duplicate error
+// (column/table/object/index/database), so non-idempotent migrations stay
+// safe to re-run.
 func isAlreadyExists(err error) bool {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) {

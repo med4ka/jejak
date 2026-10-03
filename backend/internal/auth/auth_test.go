@@ -11,7 +11,7 @@ func TestHashPasswordRoundTrip(t *testing.T) {
 		t.Fatalf("HashPassword returned error: %v", err)
 	}
 	if hash == "s3cret-pass!" {
-		t.Fatal("HashPassword returned plaintext — password must never be stored as-is")
+		t.Fatal("HashPassword returned plaintext: password must never be stored as-is")
 	}
 	if !CheckPassword(hash, "s3cret-pass!") {
 		t.Fatal("CheckPassword(hash, correct) = false, want true")
@@ -104,7 +104,7 @@ func TestMemoryStoreSlidingExpiryExtends(t *testing.T) {
 
 	// Force the stored expiry to ~30s from now (still valid, but far below
 	// the 7-day SessionTTL). A Get inside the window must succeed AND slide
-	// the expiry back out to a fresh 7 days — that is the sliding behavior.
+	// the expiry back out to a fresh 7 days: that is the sliding behavior.
 	s.mu.Lock()
 	old := s.sessions[token]
 	s.sessions[token] = Session{CreatorID: old.CreatorID, ExpiresAt: time.Now().Add(30 * time.Second)}
@@ -138,17 +138,59 @@ func TestValidUsername(t *testing.T) {
 		{"alice", true},
 		{"alice_99", true},
 		{"user123", true},
-		{"abc", true},                                  // min 3
-		{"a", false},                                   // too short
-		{"ab", false},                                  // too short
-		{"", false},                                    // empty
-		{"alice bob", false},                           // space
-		{"alice-bob", false},                           // hyphen not allowed
-		{"user.name", false},                           // dot not allowed
+		{"abc", true},        // min 3
+		{"a", false},         // too short
+		{"ab", false},        // too short
+		{"", false},          // empty
+		{"alice bob", false}, // space
+		{"alice-bob", false}, // hyphen not allowed
+		{"user.name", false}, // dot not allowed
 	}
 	for _, tt := range tests {
 		if got := ValidUsername(tt.name); got != tt.want {
 			t.Errorf("ValidUsername(%q) = %v, want %v", tt.name, got, tt.want)
 		}
+	}
+}
+func TestMemoryStoreDeleteAllForUser(t *testing.T) {
+	s := NewMemoryStore()
+	a, _ := s.Create(1)
+	b, _ := s.Create(1)
+	c, _ := s.Create(2)
+
+	removed, err := s.DeleteAllForUser(1, "")
+	if err != nil {
+		t.Fatalf("DeleteAllForUser returned error: %v", err)
+	}
+	if removed != 2 {
+		t.Fatalf("removed = %d, want 2", removed)
+	}
+	for _, tok := range []string{a, b} {
+		if _, ok := s.Get(tok); ok {
+			t.Fatal("sesi creator 1 masih hidup setelah DeleteAllForUser")
+		}
+	}
+	if _, ok := s.Get(c); !ok {
+		t.Fatal("sesi creator 2 ikut ter-revoke: harusnya hanya creator 1")
+	}
+}
+
+func TestMemoryStoreDeleteAllForUserKeepToken(t *testing.T) {
+	s := NewMemoryStore()
+	keep, _ := s.Create(1)
+	other, _ := s.Create(1)
+
+	removed, err := s.DeleteAllForUser(1, keep)
+	if err != nil {
+		t.Fatalf("DeleteAllForUser returned error: %v", err)
+	}
+	if removed != 1 {
+		t.Fatalf("removed = %d, want 1 (hanya sesi non-keep)", removed)
+	}
+	if _, ok := s.Get(keep); !ok {
+		t.Fatal("sesi peminta (keepToken) ikut ter-revoke")
+	}
+	if _, ok := s.Get(other); ok {
+		t.Fatal("sesi device lain masih hidup")
 	}
 }

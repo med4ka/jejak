@@ -18,6 +18,8 @@ func LoadDotEnv() {
 	if path == "" {
 		return
 	}
+	// #nosec G304 -- path comes from findDotEnv (the literal ".env" walked up
+	// from the working directory), never from request or user input.
 	f, err := os.Open(path)
 	if err != nil {
 		return

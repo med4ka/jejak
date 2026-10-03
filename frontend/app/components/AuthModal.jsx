@@ -2,12 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
+import SubmitButton from "./SubmitButton";
+import { useTranslation } from "../../lib/I18nProvider";
 
-// Dialog auth (login/register) — dibuka dari navbar, bukan halaman terpisah.
-// Desktop: terpusat max-width 420px. Mobile: bottom-sheet (slide dari bawah).
-// Submit via fetch ke endpoint yang ada (JSON), tanpa reload: sukses → tutup
-// + navbar update. Animasi §6: fade + scale halus, ease-out 200ms, tanpa bounce.
+// Auth dialog (login/register): opened from the navbar rather than as a
+// separate page. Desktop: centered, 420px max-width. Mobile: bottom sheet
+// (slides up from the bottom). Submits via fetch to the existing endpoints
+// (JSON), without a reload: success → close + navbar update. Animation §6:
+// gentle fade + scale, ease-out 200ms, no bounce.
 export default function AuthModal({ mode, onClose, onSuccess, st }) {
+  const { t } = useTranslation();
   const isRegister = mode === "register";
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -44,10 +48,10 @@ export default function AuthModal({ mode, onClose, onSuccess, st }) {
       try {
         data = JSON.parse(text);
       } catch {
-        throw new Error(text || "Gagal");
+        throw new Error(text || t("errors.auth.requestFailed"));
       }
       if (!res.ok) {
-        throw new Error(data.error || text || "Gagal");
+        throw new Error(data.error || text || t("errors.auth.requestFailed"));
       }
       localStorage.setItem("jejak_username", data.username);
       onSuccess(data.username);
@@ -59,7 +63,7 @@ export default function AuthModal({ mode, onClose, onSuccess, st }) {
   }
 
   const input =
-    `w-full rounded-xl ${st.borderW} ${st.border} ${st.card} px-3 py-2 text-sm transition-colors duration-150 focus:outline-none ${st.placeholder}`;
+    `w-full rounded-xl ${st.borderW} ${st.border} ${st.card} px-3 py-2 text-sm transition-all duration-150 focus:border-flash-yellow focus:ring-2 focus:ring-flash-yellow/30 focus:outline-none ${st.placeholder}`;
 
   return (
     <div className="pointer-events-none fixed inset-0 z-[60] flex items-end justify-center sm:items-start sm:px-4 sm:pt-[18vh]">
@@ -75,7 +79,7 @@ export default function AuthModal({ mode, onClose, onSuccess, st }) {
       <motion.div
         role="dialog"
         aria-modal="true"
-        aria-label={isRegister ? "Daftar" : "Masuk"}
+        aria-label={isRegister ? t("auth.register.ariaLabel") : t("auth.login.ariaLabel")}
         initial={{ opacity: 0, y: 24, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 12, scale: 0.98 }}
@@ -83,30 +87,28 @@ export default function AuthModal({ mode, onClose, onSuccess, st }) {
         className={`pointer-events-auto relative w-full rounded-t-2xl ${st.borderW} ${st.border} ${st.card} p-6 sm:max-w-[420px] sm:rounded-2xl`}
       >
         <h2 className="font-display text-xl font-bold">
-          {isRegister ? "Daftar jadi Kreator" : "Masuk"}
+          {isRegister ? t("auth.register.title") : t("auth.login.title")}
         </h2>
           <p className={`mt-1 text-sm ${st.textMuted}`}>
-          {isRegister ? "Satu akun, satu halaman publik untuk semua link kamu." : "Sesi login tersimpan sebagai cookie HttpOnly."}
+          {isRegister ? t("auth.register.subtitle") : t("auth.login.subtitle")}
         </p>
 
         <form onSubmit={onSubmit} className="mt-4 flex flex-col gap-3">
-          <input value={username} onChange={(e) => setUsername(e.target.value)} required placeholder="username" autoFocus className={input} />
+          <input value={username} onChange={(e) => setUsername(e.target.value)} required placeholder={t("auth.usernamePlaceholder")} autoFocus className={input} />
           {isRegister && (
             <>
-              <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} required placeholder="Nama tampil" className={input} />
-              <input value={bio} onChange={(e) => setBio(e.target.value)} placeholder="Bio singkat (opsional)" className={input} />
+              <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} required placeholder={t("auth.register.displayNamePlaceholder")} className={input} />
+              <input value={bio} onChange={(e) => setBio(e.target.value)} placeholder={t("auth.register.bioPlaceholder")} className={input} />
             </>
           )}
-          <input value={password} onChange={(e) => setPassword(e.target.value)} required minLength={isRegister ? 8 : undefined} type="password" placeholder={isRegister ? "Password (min 8 karakter)" : "password"} className={input} />
-          <motion.button
-            type="submit"
-            disabled={loading}
-            whileTap={{ scale: 0.97 }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
-            className={`rounded-full border-2 border-ink ${st.accent} px-4 py-2.5 text-sm font-bold transition-[filter] duration-150 hover:brightness-95 disabled:opacity-50`}
+          <input value={password} onChange={(e) => setPassword(e.target.value)} required minLength={isRegister ? 8 : undefined} type="password" placeholder={isRegister ? t("auth.register.passwordPlaceholder") : t("auth.login.passwordPlaceholder")} className={input} />
+          <SubmitButton
+            isLoading={loading}
+            loadingLabel={isRegister ? t("auth.register.submitLoading") : t("auth.login.submitLoading")}
+            className={`rounded-full border-2 border-ink ${st.accent} px-4 py-2.5 text-sm font-bold transition-[filter] duration-150 hover:brightness-95`}
           >
-            {loading ? "..." : isRegister ? "Buat Akun" : "Masuk"}
-          </motion.button>
+            {isRegister ? t("auth.register.submit") : t("auth.login.submit")}
+          </SubmitButton>
         </form>
 
         {error !== "" && (

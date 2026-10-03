@@ -1,64 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
-import { THEMES, themeStyles } from "../../lib/themes";
+import { themeStyles } from "../../lib/themes";
 import ThemeBackdrop from "../components/ThemeBackdrop";
 import ShortenForm from "../components/ShortenForm";
 
-// Halaman /app — isi SAMA PERSIS dengan homepage lama (dipindah utuh pada
-// refactor TAHAP B). Homepage "/" sekarang hanya redirect ke sini.
+// /app page: content IDENTICAL to the former homepage (moved verbatim in the
+// stage B refactor). The "/" homepage now only redirects here.
 //
-// Task 4 — dulu SELALU hardcode tema CLASSIC walau kreator login:
-// bg-print-white, input border-ink bg-print-white text-ink,
-// placeholder:text-muted, error box bg-paper-grey dst; akibatnya user yang
-// set profil darkroom/glass/coral, pas buka halaman utama, wajahnya NABRAK
-// dengan tema mereka — seolah "shortener bukan bagian dari brand aku".
-// Sekarang halaman ini ikut tema kreator:
-//   - guest / belum login → classic (default, aman).
-//   - login               → profile.theme dari GET /api/profile di-render
-//     persis seperti halaman publik /u: body[data-profile-theme] + 
-//     ThemeBackdrop (gradien glass/grain halus di semua tema) + semua token
-//     styling lewat st.* (card/border/teks/placeholder ikut panggung).
-// Shortener tetap berfungsi identik — hanya wajahnya yang ikut tema.
-// Form-nya sendiri sekarang diekstrak ke components/ShortenForm.jsx.
+// THEME SCOPE (decision 2026-09-29): this page is ALWAYS classic (Instant
+// Print). It once followed the creator theme (fetching GET /api/profile and
+// setting body[data-profile-theme], with a stale effect as well because of the
+// empty deps []), but the refinement pass narrowed the scope: the theme applies
+// ONLY on /u/[username] plus the navbar while standing there. The shortener is
+// presented on the instant print stage for EVERY user: guest and logged-in
+// alike: so the "utility" never changes appearance.
+// The form itself was extracted to components/ShortenForm.jsx.
 export default function AppHome() {
-  const [theme, setTheme] = useState("classic");
-  const st = themeStyles(theme);
-
-  // Ikut tema user login (guest → classic). Body data-profile-theme di-set
-  // supaya globals.css (background glass/darkroom) + grain ikut; cleanup saat
-  // unmount (sama pola DashboardClient/Navbar di /u).
-  useEffect(() => {
-    document.body.dataset.profileTheme = theme;
-    const u = localStorage.getItem("jejak_username");
-    if (!u) {
-      return;
-    }
-    // Tema hanya dipakai kalau profil benar-benar login punya theme valid.
-    fetch("/api/profile", { cache: "no-store" })
-      .then(async (res) => {
-        const text = await res.text();
-        let d = {};
-        try {
-          d = JSON.parse(text);
-        } catch {
-          return;
-        }
-        if (res.ok && THEMES.includes(d.theme)) {
-          setTheme(d.theme);
-        }
-      })
-      .catch(() => {});
-    return () => {
-      delete document.body.dataset.profileTheme;
-    };
-  }, []);
+  const st = themeStyles("classic");
 
   return (
-    <main className={`mx-auto w-full max-w-6xl px-4 pb-16 pt-14 sm:px-6 lg:px-8 ${st.text}`}>
+    <main className={`mx-auto w-full max-w-6xl px-4 pb-16 pt-20 sm:px-6 lg:px-8 ${st.text}`}>
 
-      <ThemeBackdrop theme={theme} />
+      <ThemeBackdrop />
       <p className={`inline-block ${st.radiusFull} ${st.borderW} ${st.border} ${st.chip} px-3 py-1 font-mono text-xs font-bold uppercase tracking-[0.15em] ${st.textMuted}`}>
         Link-in-bio untuk kreator
       </p>
@@ -68,10 +32,12 @@ export default function AppHome() {
         untuk semua link kamu.
       </h1>
       <p className={`mt-2 text-sm ${st.textMuted}`}>
-        Persingkat link di bawah — kalau kamu login, link otomatis masuk ke profil publikmu.
+        Persingkat link di bawah: kalau kamu login, link otomatis masuk ke profil publikmu.
       </p>
 
-      <ShortenForm st={st} />
+      <div className="mt-6">
+        <ShortenForm st={st} />
+      </div>
 
       <p className="mt-6">
         <Link href="/links" className={`inline-block ${st.radiusFull} ${st.borderW} ${st.border} ${st.accent} px-5 py-2 text-sm font-bold`}>

@@ -1,0 +1,639 @@
+{
+  "nav": {
+    "brand": "JEJAK",
+    "aria": {
+      "mainMenu": "Main menu",
+      "mobileMenu": "Mobile menu",
+      "drawer": "Navigation menu",
+      "openMenu": "Open menu",
+      "closeMenu": "Close menu",
+      "accountMenu": "Account menu"
+    },
+    "menu": {
+      "features": "Features",
+      "dashboard": "Dashboard",
+      "demo": "Demo",
+      "faq": "FAQ"
+    },
+    "features": {
+      "customSlug": {
+        "label": "Custom Slug",
+        "desc": "Your links look professional"
+      },
+      "smartLink": {
+        "label": "Smart Link",
+        "desc": "Redirect per device"
+      },
+      "qrCode": {
+        "label": "QR Code",
+        "desc": "Ready to scan"
+      },
+      "analytics": {
+        "label": "Analytics",
+        "desc": "Track performance"
+      }
+    },
+    "cta": {
+      "newLink": "New Link",
+      "login": "Log in",
+      "register": "Sign Up Free →"
+    },
+    "account": {
+      "title": "@{username}",
+      "titleFallback": "Account",
+      "nameFallback": "User",
+      "profile": "Profile",
+      "logout": "Log out"
+    },
+    "claimMessage": "{count} links added to your account"
+  },
+  "landing": {
+    "hero": {
+      "badge": "LINK-IN-BIO FOR CREATORS",
+      "headline": "One page,\nall your links.",
+      "subheadline": "Shorten all your social links into one shareable page: with smart per-device redirect and full analytics behind it.",
+      "proof": "Try it first: create a link without signing up, ready to share right away."
+    },
+    "mockup": {
+      "badge": "example",
+      "copyButton": "Copy"
+    },
+    "socialProof": {
+      "caption": "One page for links from all your platforms",
+      "platforms": {
+        "youtube": "Youtube",
+        "shopee": "Shopee",
+        "instagram": "Instagram",
+        "tiktok": "TikTok",
+        "tokopedia": "Tokopedia",
+        "spotify": "Spotify"
+      },
+      "stats": {
+        "free": {
+          "value": "Free",
+          "label": "core features at no cost"
+        },
+        "instant": {
+          "value": "Instant",
+          "label": "a link in 1 step"
+        },
+        "honest": {
+          "value": "Honest",
+          "label": "click counts from real data"
+        }
+      }
+    },
+    "features": {
+      "heading": "Why Jejak?",
+      "items": {
+        "customSlug": {
+          "title": "Custom Slug",
+          "desc": "Choose your own short code so your brand stands out, not a random string. For example jejak.app/r/your-name."
+        },
+        "smartLink": {
+          "title": "Smart Link",
+          "desc": "One link, a different destination per device: send mobile visitors to WhatsApp and desktop visitors to your website. Automatically."
+        },
+        "qrCode": {
+          "title": "QR Code",
+          "desc": "Your link becomes a scannable QR for posters, packaging, or business cards. Change the link and the QR updates too."
+        },
+        "analytics": {
+          "title": "Analytics",
+          "desc": "Track clicks, unique visitors, and performance for every link: all on one dashboard, real numbers, not fakes."
+        }
+      }
+    },
+    "demo": {
+      "heading": "See what your link looks like",
+      "slugLabel": "Type your slug",
+      "slugPlaceholder": "your-name",
+      "previewNote": "Preview your link: with the QR beside it updating in real time."
+    },
+    "faq": {
+      "heading": "Got questions?",
+      "items": {
+        "comparison": {
+          "q": "How is Jejak different from bit.ly or Linktree?",
+          "a": "Jejak is all-in-one: one app to shorten links (with a custom slug), build a named link-in-bio profile page, and view a dashboard of clicks per link: plus QR codes and indie print themes. So you don't need to juggle several services at once."
+        },
+        "free": {
+          "q": "Is this free?",
+          "a": "Yes. The dashboard, public profile page, custom slug, and click counts are all free at this stage: no card required. If paid features arrive later, we'll announce it clearly first, not quietly."
+        },
+        "customSlug": {
+          "q": "Can I use my own name / custom slug?",
+          "a": "Yes. That's actually Jejak's core feature: you set the short code yourself (for example jejak.app/r/your-name) so it's easy to remember & from the dashboard you can see click counts for each link. Not a random string."
+        },
+        "analytics": {
+          "q": "Do analytics / click counts work right away?",
+          "a": "Right away. Every link has a click count shown on the dashboard and on the profile page: honest numbers matching real clicks, not fakes to look busy. Plus a per-link QR code that scans too."
+        }
+      }
+    },
+    "accent": {
+      "title": "Free.",
+      "subtitle": "Dashboard, custom slug, QR, and analytics: no card at this stage.",
+      "eyebrow": "for indie creators"
+    },
+    "cta": {
+      "heading": "Interested? Sign up free now.",
+      "subtext": "No card, no hassle: shorten your links right away and see the analytics.",
+      "button": "Sign Up Free"
+    }
+  },
+  "footer": {
+    "brand": "Jejak",
+    "tagline": "One page for all your links: built for indie creators in Indonesia.",
+    "columnTitles": {
+      "product": "Product",
+      "company": "Company",
+      "legal": "Legal"
+    },
+    "links": {
+      "shorten": "Shorten",
+      "linkInBio": "Link-in-bio",
+      "qrCode": "QR Code",
+      "contact": "Contact",
+      "privacy": "Privacy Policy",
+      "terms": "Terms & Conditions"
+    },
+    "copyright": "© {year} Jejak: printed with {heart} in Indonesia"
+  },
+  "dashboard": {
+    "metadata": {
+      "title": "Dashboard: Jejak",
+      "description": "Edit your creator profile and view links + analytics."
+    },
+    "heading": "Dashboard",
+    "loading": {
+      "general": "Loading...",
+      "dashboardLabel": "Loading dashboard"
+    },
+    "notLoggedIn": "Log in first via the Log in button in the navbar to edit your profile.",
+    "redirectNotice": "Redirecting...",
+    "tabs": {
+      "ringkasan": "Summary",
+      "linkSaya": "My Links",
+      "analytics": "Analytics",
+      "profile": "Profile",
+      "apiKeys": "API Keys",
+      "settings": "Settings"
+    },
+    "actions": {
+      "copy": "Copy",
+      "saving": "Saving...",
+      "creating": "Creating..."
+    },
+    "ringkasan": {
+      "greeting": "Hello, {displayName}",
+      "greetingFallback": "Hello",
+      "subtitle": "Here's your Jejak summary for today.",
+      "stats": {
+        "totalLinks": "Total Active Links",
+        "totalClicks": "Total Clicks",
+        "uniqueClicks30d": "Unique Clicks (30 days)",
+        "growthPct": "Growth %"
+      },
+      "trendTitle": "Last 30 Days Trend",
+      "topLinksTitle": "Top Links",
+      "topLinks": {
+        "clickCount": "{count} clicks"
+      }
+    },
+    "links": {
+      "title": "My links",
+      "welcome": {
+        "heading": "Welcome! Start here →",
+        "step1": "1. {action}.",
+        "step1Action": "↑ Create your first short link in the form above",
+        "step2": "2. {action} so your public page is ready to share.",
+        "step2Action": "Complete your profile"
+      },
+      "toolbar": {
+        "bulkImport": "Bulk Import",
+        "qrDownloadTitle": "Download QR codes for all links (or matching the tag filter) in 1 ZIP: max 200",
+        "qrDownload": "Download QR"
+      },
+      "filter": {
+        "label": "Filter tag:",
+        "allOption": "All"
+      },
+      "row": {
+        "dragDisabledTitle": "Reset the filter to reorder",
+        "dragTitle": "Drag to reorder",
+        "featureTitle": "Feature this",
+        "unfeatureTitle": "Remove feature",
+        "meta": "/{shortCode} · {count} clicks",
+        "editTooltip": "Set per-device URL & tags",
+        "edit": "Edit",
+        "qr": "QR",
+        "activateTooltip": "Reactivate (redirect works again)",
+        "deactivateTooltip": "Deactivate link (redirect returns 410, still shown in dashboard)",
+        "active": "Active",
+        "inactive": "Inactive",
+        "badges": {
+          "expired": "Expired",
+          "endsIn": "Ends in {hours}h"
+        }
+      },
+      "order": {
+        "savingOrder": "Saving order...",
+        "orderSaved": "Order saved.",
+        "orderFailed": "Failed to save: order reverted.",
+        "savingFeature": "Saving feature...",
+        "removingFeature": "Removing feature...",
+        "featureSaved": "Feature saved.",
+        "featureRemoved": "Feature removed.",
+        "savingStatus": "Saving status...",
+        "statusActive": "Link reactivated.",
+        "statusInactive": "Link deactivated.",
+        "failed": "Failed: changes reverted."
+      }
+    },
+    "analytics": {
+      "ranges": {
+        "last7Days": "7 days",
+        "last30Days": "30 days",
+        "last90Days": "90 days"
+      },
+      "devices": {
+        "desktop": "Desktop",
+        "mobile": "Mobile",
+        "tablet": "Tablet",
+        "bot": "Bot",
+        "unknown": "Unknown"
+      },
+      "referrers": {
+        "direct": "Direct",
+        "search": "Search engines",
+        "social": "Social media",
+        "chat": "Chat apps",
+        "other": "Other"
+      },
+      "exports": {
+        "daily": "Daily summary",
+        "perLink": "Per link",
+        "rawClicks": "Raw clicks"
+      },
+      "deviceTitle": "Devices",
+      "referrerTitle": "Sources",
+      "sourceOfData": "Data source: {dataPer}",
+      "exportTitle": "Export CSV",
+      "exportDescription": "Download the {rangeLabel} range data to open in a spreadsheet. Maximum 10,000 rows per file; if there's more data, the file notes the truncation in the last column."
+    },
+    "chart": {
+      "heading": "Clicks in the last {days} days",
+      "loading": "Loading chart...",
+      "empty": "No clicks in the last {days} days: share your link to bring the chart to life.",
+      "tooltipClickCount": "{count} clicks",
+      "months": {
+        "jan": "Jan",
+        "feb": "Feb",
+        "mar": "Mar",
+        "apr": "Apr",
+        "may": "May",
+        "jun": "Jun",
+        "jul": "Jul",
+        "aug": "Aug",
+        "sep": "Sep",
+        "oct": "Oct",
+        "nov": "Nov",
+        "dec": "Dec"
+      }
+    },
+    "emptyStates": {
+      "noLinks": "No links yet. Create one from the main page first.",
+      "noTagMatch": "No links with this tag.",
+      "noKeys": "No keys yet: create one using the form above.",
+      "noTopLinks": "No links yet: create one in the My Links tab.",
+      "noClicks30d": "No clicks in the last 30 days.",
+      "noClicksInRange": "No clicks in this range."
+    },
+    "settings": {
+      "profile": {
+        "publicPageLabel": "Your public page:",
+        "viewProfile": "View Profile",
+        "displayNameLabel": "Display name",
+        "bioLabel": "Bio (max 500)",
+        "avatarLabel": "Avatar",
+        "avatarChange": "Change photo",
+        "avatarAlt": "Avatar",
+        "avatarFileHint": "New photo: will be uploaded when you Save Profile.",
+        "avatarUrlLabel": "... or a direct avatar URL (leave empty = no avatar)",
+        "avatarUrlPlaceholder": "https://...",
+        "socialsLabel": "Socials (max 10)",
+        "socialPlatformPlaceholder": "Platform (e.g. IG)",
+        "socialUrlPlaceholder": "https://...",
+        "removeSocialAria": "Remove",
+        "addSocial": "+ Add social",
+        "themeLabel": "Public page theme",
+        "themeOptionAria": "Theme {themeName}",
+        "saveButton": "Save Profile",
+        "savedNotice": "Profile saved."
+      },
+      "apiKeys": {
+        "docsToggle": "How to use the API",
+        "docsExampleIntro": "Example call:",
+        "labelLabel": "Label (optional, for your reference)",
+        "labelPlaceholder": "e.g. CI script",
+        "createButton": "Create New Key",
+        "generatedWarning": "Save it now: it won't be shown again!",
+        "activeKeysTitle": "Active keys",
+        "noLabel": "(no label)",
+        "keyMeta": "created {createdAt} · last used {lastUsedAt}",
+        "deleteButton": "Delete",
+        "deleteConfirm": "Delete this API key? Integrations using it will stop working.",
+        "createdNotice": "Key created. Copy it now: it won't be shown again.",
+        "deletedNotice": "Key deleted."
+      },
+      "account": {
+        "email": {
+          "title": "Change Email",
+          "description": "The new email will be used for your account. Your password is required to confirm.",
+          "emailLabel": "New email",
+          "emailPlaceholder": "name@example.com",
+          "passwordLabel": "Current password",
+          "submit": "Save Email"
+        },
+        "password": {
+          "title": "Change Password",
+          "description": "After changing it, all other devices are signed out automatically.",
+          "currentLabel": "Current password",
+          "newLabel": "New password (min 8 characters)",
+          "confirmLabel": "Repeat new password",
+          "submit": "Save Password"
+        },
+        "danger": {
+          "title": "Danger Zone",
+          "logoutTitle": "Log out from all devices",
+          "logoutDescription": "End the session on all devices, including this one.",
+          "logoutButton": "Log out everywhere",
+          "deleteTitle": "Delete account",
+          "deleteDescription": "Permanently deletes your profile, links, analytics, and API keys.",
+          "deleteButton": "Delete Account"
+        },
+        "confirmLogout": {
+          "title": "Log out from all devices?",
+          "description": "All active sessions (including this one) will end. You'll need to log in again on each device.",
+          "confirmLabel": "Yes, log out everywhere"
+        },
+        "confirmDelete": {
+          "title": "Delete account permanently?",
+          "description": "This action can't be undone. Your profile, all links, analytics, and API keys will be gone forever.",
+          "confirmLabel": "Delete Permanently",
+          "typeToken": "DELETE",
+          "passwordLabel": "Current password (required)"
+        }
+      }
+    }
+  },
+  "onboarding": {
+    "regionLabel": "Getting started guide",
+    "title": "Start here",
+    "closeLabel": "Close guide",
+    "progressLabel": "Onboarding progress",
+    "steps": {
+      "link": {
+        "label": "Create your first link",
+        "cta": "Create Link"
+      },
+      "profile": {
+        "label": "Complete your public profile",
+        "cta": "Complete"
+      },
+      "share": {
+        "label": "Share your public page",
+        "cta": "Share"
+      }
+    }
+  },
+  "auth": {
+    "usernamePlaceholder": "username",
+    "login": {
+      "ariaLabel": "Log in",
+      "title": "Log in",
+      "subtitle": "The login session is stored as an HttpOnly cookie.",
+      "passwordPlaceholder": "password",
+      "submit": "Log in",
+      "submitLoading": "Logging in..."
+    },
+    "register": {
+      "ariaLabel": "Sign up",
+      "title": "Sign up as a Creator",
+      "subtitle": "One account, one public page for all your links.",
+      "displayNamePlaceholder": "Display name",
+      "bioPlaceholder": "Short bio (optional)",
+      "passwordPlaceholder": "Password (min 8 characters)",
+      "submit": "Create Account",
+      "submitLoading": "Signing up..."
+    }
+  },
+  "toast": {
+    "emailInvalid": "Invalid email.",
+    "emailCurrentPasswordRequired": "Enter your current password.",
+    "emailUpdated": "Email updated.",
+    "passwordCurrentRequired": "Enter your current password.",
+    "newPasswordTooShort": "New password must be at least 8 characters.",
+    "passwordMismatch": "New passwords don't match.",
+    "passwordUpdated": "Password updated. Other devices were signed out.",
+    "allDevicesLoggedOut": "All devices have been signed out.",
+    "accountDeleted": "Account deleted.",
+    "noLinksWithTag": "No links with this tag.",
+    "noLinksToDownload": "No links to download yet.",
+    "tooManyLinksForQr": "Too many links ({count}): filter by tag first (max 200).",
+    "qrDownloaded": "{count} QR downloaded."
+  },
+  "errors": {
+    "auth": {
+      "requestFailed": "Failed"
+    },
+    "shorten": {
+      "createFailed": "Couldn't create the link: check the URL and try again."
+    },
+    "editLink": {
+      "saveFailed": "Failed to save"
+    },
+    "bulkImport": {
+      "importFailed": "Failed to import links: try again.",
+      "reasonNotHttp": "must be http(s)",
+      "reasonNotUrl": "not a valid URL",
+      "reasonDuplicate": "duplicate",
+      "nothingCreated": "No links were created."
+    },
+    "copy": {
+      "failed": "Failed"
+    },
+    "account": {
+      "requestFailed": "Request failed"
+    },
+    "dashboard": {
+      "loginRequired": "Log in first via the Log in button in the navbar to edit your profile.",
+      "loadProfile": "Failed to load profile",
+      "loadKey": "Failed to load key",
+      "generateKey": "Failed to generate key",
+      "deleteKey": "Failed to delete key",
+      "reorderFailed": "Failed to save: order reverted.",
+      "changeReverted": "Failed: changes reverted.",
+      "qrZipFailed": "Failed to create QR ZIP.",
+      "uploadPhotoFailed": "Failed to upload photo",
+      "saveProfile": "Failed to save"
+    },
+    "analytics": {
+      "breakdownLoad": "Failed to load analytics",
+      "chartLoad": "Failed to load chart"
+    },
+    "api": {
+      "unreachable": "Go API unreachable",
+      "invalidRequestBody": "Invalid request body",
+      "upstream": "Go API error"
+    },
+    "redirect": {
+      "notFoundTitle": "Link not found.",
+      "notFoundText": "This link doesn't exist yet or may have a typo. Open the owner's profile page again to check their list of links.",
+      "expiredTitle": "This link has expired.",
+      "expiredText": "This link is past its validity period and can no longer be opened.",
+      "serverTitle": "Something's wrong. Try again.",
+      "serverText": "The Jejak server is busy or not connected yet. Try again in a moment.",
+      "invalidCode": "Invalid link code"
+    }
+  },
+  "notFound": {
+    "title": "This page leaves no trace.",
+    "subtitle": "Maybe the link is wrong, or it's been moved.",
+    "goHomeButton": "Back to Home",
+    "checkLinksButton": "Check your links"
+  },
+  "terms": {
+    "title": "Terms & Conditions",
+    "paragraph1": "By using Jejak, you agree to use this service reasonably: creating legitimate links, not abusing the shortener feature, and not uploading content that breaks the law.",
+    "paragraph2": "This page is still a placeholder: the official Terms & Conditions text is being drafted and will be published here before the official launch. If you have any questions, contact us through the contact page.",
+    "lastUpdated": "Last updated: (not yet in effect).",
+    "backToHome": "Back to Home"
+  },
+  "privacy": {
+    "title": "Privacy Policy",
+    "paragraph1": "We only collect the data needed to run Jejak: the account you register, and visit statistics for your links (clicks, referrer, time) for analytics in the dashboard.",
+    "paragraph2": "This page is still a placeholder: the full privacy policy: including data retention, cookies, and your rights over your data: is being drafted and will be published here before the official launch.",
+    "lastUpdated": "Last updated: (not yet in effect).",
+    "backToHome": "Back to Home"
+  },
+  "contact": {
+    "title": "Contact",
+    "paragraph1": "Have a question, suggestion, or bug report? We love hearing from creators who use Jejak: whether it's about link-in-bio, the shortener, or analytics.",
+    "paragraph2": "Email {email} and we'll reply as soon as we can. This page is still a placeholder: other contact channels (form, social media) are coming.",
+    "responseTime": "We usually reply within 1-2 business days.",
+    "backToHome": "Back to Home"
+  },
+  "forms": {
+    "appPage": {
+      "badge": "Link-in-bio for creators",
+      "headingLine1": "One page",
+      "headingLine2": "for all your links.",
+      "subtitle": "Shorten the links below: if you're logged in, links go straight to your public profile.",
+      "analyticsLink": "View analytics →"
+    },
+    "shorten": {
+      "urlAriaLabel": "Original URL you want to shorten",
+      "urlPlaceholder": "https://example.com/your-link",
+      "loadingLabel": "Creating link...",
+      "submitLabel": "Shorten",
+      "slugAriaLabel": "Custom slug (optional)",
+      "slugPlaceholder": "Custom slug (optional, 3-30: letters/numbers/_/-)",
+      "tagAriaLabel": "Tag (optional)",
+      "tagPlaceholder": "Tag (optional, comma-separated: e.g. youtube, promo)",
+      "expiryAriaLabel": "Active until (optional)",
+      "helperText": "Optional: the link stops redirecting (410) after this time. The time is shown in your local time zone.",
+      "resultHint": "Click to open the redirect."
+    },
+    "editLink": {
+      "dialogAriaLabel": "Edit link /{shortCode}",
+      "shortCode": "/{shortCode}",
+      "mainUrlLabel": "Main URL: {originalUrl}",
+      "iosLabel": "iOS URL (optional)",
+      "iosPlaceholder": "https://apps.apple.com/...",
+      "androidLabel": "Android URL (optional)",
+      "androidPlaceholder": "https://play.google.com/...",
+      "tagLabel": "Tag (comma-separated, max 5)",
+      "tagPlaceholder": "deeplink, promo",
+      "expiryLabel": "Active until (optional)",
+      "clearExpiryTitle": "Remove time limit (active forever)",
+      "expiryCurrent": "Current: {formattedDate}",
+      "noExpiryHint": "No time limit: leave empty to stay active."
+    },
+    "bulkImport": {
+      "title": "Import many links",
+      "description": "Paste 10-100 URLs, one per line. Blank lines are ignored.",
+      "urlLabel": "URLs (one per line)",
+      "urlPlaceholder": "https://example.com/1\nhttps://example.com/2\nhttps://example.com/3",
+      "totalLinesCount": "{totalLines} URLs",
+      "maxWarning": ": max 100",
+      "minWarning": ": min 10",
+      "validCount": "{validCount} valid",
+      "lineLabel": "line {line}",
+      "tagLabel": "Tag for all imported links (optional)",
+      "tagPlaceholder": "promo, October",
+      "loadingLabel": "Importing...",
+      "submitLabel": "Import",
+      "submitLabelWithCount": "Import {validCount} links",
+      "resultSummary": "{created} links created, {failed} failed",
+      "done": "Done",
+      "failedRow": "line {line}: {url}: {error}",
+      "openMyLinks": "Open My Links",
+      "emptyResult": "No links were created."
+    },
+    "qr": {
+      "dialogAriaLabel": "QR Code {shortCode}",
+      "shortCode": "/{shortCode}",
+      "copyUrlLabel": "Copy URL",
+      "downloadLabel": "Download PNG"
+    },
+    "share": {
+      "title": "Share Page",
+      "description": "Copy the link, save the QR, or open your profile.",
+      "urlAriaLabel": "Public page link"
+    },
+    "confirm": {
+      "typingPrompt": "Type {requireTyping} to continue"
+    },
+    "profileLinks": {
+      "emptyTitle": "No links here yet.",
+      "emptyDescription": "This creator hasn't added any links. Check back later.",
+      "featuredBadge": "★ Featured",
+      "trendingBadge": "Trending",
+      "shortCode": "/{shortCode}"
+    }
+  },
+  "common": {
+    "copy": "Copy",
+    "copied": "Copied",
+    "failed": "Failed",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "confirm": "Confirm",
+    "processing": "Processing...",
+    "loading": "Loading...",
+    "saving": "Saving...",
+    "clearExpiry": "Remove time limit",
+    "viewProfile": "View Profile",
+    "downloadQr": "Download QR",
+    "themes": {
+      "classic": "Classic",
+      "darkroom": "Darkroom",
+      "coral": "Coral",
+      "glass": "Glass",
+      "risoPrint": "Riso Print",
+      "peach": "Peach",
+      "lavender": "Lavender",
+      "matcha": "Matcha",
+      "sakura": "Sakura",
+      "ocean": "Ocean",
+      "sunset": "Sunset"
+    }
+  },
+  "metadata": {
+    "title": "Jejak: One link, all your content",
+    "description": "One page for all your creator links, complete with click analytics."
+  }
+}

@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 
 const GO_API_URL = process.env.GO_API_URL || "http://localhost:8081";
 
-// Proxy analytics -> Go GET /api/analytics/clicks-by-day. Cookie sesi
-// diteruskan (Go menolak tanpa login + memfilter ke link milik sendiri).
+// Proxy analytics -> Go GET /api/analytics/clicks-by-day. The session cookie is
+// forwarded (Go rejects unauthenticated requests and filters the result to the
+// caller's own links).
 export async function GET(req) {
   const cookie = req.headers.get("cookie") || "";
 

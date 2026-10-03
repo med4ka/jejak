@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,24 +11,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	"jejak/internal/middleware"
 	"jejak/internal/db"
+	"jejak/internal/middleware"
 )
 
-// LEARN:
-//
-//	Kenapa: PUT profil memakai semantik full-replace (seluruh display_name +
-//	bio + avatar + socials dikirim tiap save), bukan PATCH per-field. Untuk
-//	form kecil ini lebih sederhana: tidak ada merge-setengah-jalan, validasi
-//	satu tempat, dan respons bisa echo input tervalidasi TANPA baca ulang DB
-//	(baca-ulang dari replica akan basi karena update baru masuk primary —
-//	jebakan read-your-write yang sama seperti smoke test clicks kemarin).
-//	Batasan validasi (nama 1-100, bio ≤500, ≤10 sosial, URL http(s)) adalah
-//	pilihan MVP yang eksplisit, bukan aturan produk final.
-//	Trade-off: Client harus selalu kirim lengkap (lupa 1 field = ke-reset);
-//	username immutable (ganti username = ganti URL publik + cek unik ulang).
-//	Alternatif: PATCH JSON-merge per field — fleksibel tapi butuh logika
-//	"field absen vs kosong" yang gampang salah.
+// HandleGetMyProfile returns the logged-in creator's profile plus link list
+// (GET /api/profile, session auth). 401 without a session, 404 when the
+// account no longer exists, 500 on database errors. The reads go to the
+// primary on purpose (read-your-own-writes, see below), not the replica.
 func (h *Handler) HandleGetMyProfile(w http.ResponseWriter, r *http.Request) {
 	creatorID := middleware.CreatorID(r)
 	if creatorID == nil {
@@ -35,10 +26,10 @@ func (h *Handler) HandleGetMyProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Baca dari PRIMARY (bukan replica): ini data milik user sendiri, jadi
-	// user harus langsung lihat perubahannya sendiri tanpa menunggu
-	// sinkronisasi replica manual (read-your-own-writes). Halaman publik
-	// /api/u/{username} TETAP baca replica (HandleCreatorLinks).
+	// Read from PRIMARY, not the replica: this is the caller's own data, so
+	// changes must become visible immediately without waiting for manual
+	// replica sync (read-your-own-writes). The public page
+	// /api/u/{username} still reads from the replica (HandleCreatorLinks).
 	creator, err := h.Store.GetCreatorByIDPrimary(*creatorID)
 	if err != nil {
 		http.Error(w, "Creator not found", http.StatusNotFound)
@@ -58,6 +49,18 @@ func (h *Handler) HandleGetMyProfile(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(creatorProfileJSON(creator, links))
 }
 
+// HandleUpdateMyProfile replaces the entire profile (display_name, bio,
+// avatar, socials, theme) on every save rather than patching single fields.
+// For a form this small full-replace is simpler: no half-way merge, a single
+// validation site, and the response can echo the validated input without a
+// database re-read: a re-read would hit the replica and return stale data
+// (the read-your-write trap). Validation limits (name 1-100, bio <= 500,
+// <= 10 socials, http(s) URLs) are explicit MVP choices, not final product
+// rules. Trade-off: the client must always send every field (a forgotten
+// field is reset) and the username stays immutable, since changing it would
+// change the public URL and force a new uniqueness check. A per-field JSON
+// merge PATCH was rejected because "absent versus empty" handling is easy
+// to get wrong.
 func (h *Handler) HandleUpdateMyProfile(w http.ResponseWriter, r *http.Request) {
 	creatorID := middleware.CreatorID(r)
 	if creatorID == nil {
@@ -92,15 +95,15 @@ func (h *Handler) HandleUpdateMyProfile(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "avatar_url must be empty or http(s) URL", http.StatusBadRequest)
 		return
 	}
-	// Tema dari preset tertutup (classic|darkroom|coral|glass) — bukan
-	// free-form color. Set terbuka ke sana saat bereksperimen preset baru;
-	// theme "glass" sengaja EXPONENT (bisa dihapus lagi tanpa migrasi —
-	// migrasi — teks lancar di-read validTheme, jadi GET tidak pernah bocor
-	// nilai tak dikenal ke frontend).
-	// Data kotor (mis. kolom DB yang di-set manual) di-coerce di layer payload
-	// (validTheme), jadi GET tidak pernah bocor nilai tak dikenal ke frontend.
+	// Themes come from a closed preset set
+	// (classic|darkroom|coral|glass|risoPrint|peach|lavender|matcha|sakura|
+	// ocean|sunset), never a free-form color; extend that set when
+	// experimenting with new presets. The "glass" preset is deliberately
+	// EXPERIMENTAL so it can be dropped again without a migration. Dirty
+	// data (e.g. a manually updated DB column) is coerced at the payload
+	// layer (validTheme), so GET never leaks an unknown value to the frontend.
 	if !validThemePreset(req.Theme) {
-		http.Error(w, "theme must be one of: classic, darkroom, coral, glass", http.StatusBadRequest)
+		http.Error(w, "theme must be one of: classic, darkroom, coral, glass, risoPrint, peach, lavender, matcha, sakura, ocean, sunset", http.StatusBadRequest)
 		return
 	}
 	if len(req.Socials) > 10 {
@@ -134,8 +137,9 @@ func (h *Handler) HandleUpdateMyProfile(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Echo input tervalidasi (bukan baca ulang — lihat LEARN di atas).
-	// Baca username via PRIMARY: data milik sendiri, konsisten dgn GET.
+	// Echo the validated input instead of re-reading it: a re-read could come
+	// back stale from the replica. The username is read via PRIMARY (own
+	// data, consistent with GET).
 	creator, err := h.Store.GetCreatorByIDPrimary(*creatorID)
 	username := ""
 	if err == nil {
@@ -152,22 +156,15 @@ func (h *Handler) HandleUpdateMyProfile(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// LEARN: Kenapa magic bytes, bukan cuma ekstensi/Content-Type?
-// ----------
-// Klien BISA berbohong soal Content-Type (header HTTP) dan nama file.
-// Contoh: upload file PHP berbahaya tapi beri nama "photo.jpg" + kirim
-// Content-Type: image/jpeg. Kalau server hanya cek ekstensi atau header,
-// file berbahaya itu lolos dan tersimpan di disk. Magic bytes (file
-// signature) adalah urutan byte PERTAMA yang ditulis oleh software pembuat
-// format gambar — JPEG selalu diawali FF D8 FF, PNG selalu 89 50 4E 47
-// dst. Urutan ini tidak bisa dipalsukan tanpa merusak file gambar itu
-// sendiri. Validasi ini dilakukan 100% server-side; klien tidak punya
-// kontrol sedikitpun atas pengecekan ini.
-// ----------
-// HandleUploadAvatar menerima upload gambar profil (POST /api/profile/avatar,
-// multipart/form-data, field "avatar"). Validasi: magic bytes (jpg/png/webp),
-// max 2MB. Simpan ke uploads/avatars/{id}.{ext}, update avatar_url di DB,
-// return JSON {"avatar_url": "..."}.
+// HandleUploadAvatar serves POST /api/profile/avatar: it validates and stores
+// the profile image from the multipart "avatar" field. Detection uses magic
+// bytes rather than the file extension or Content-Type because both are
+// client-supplied and falsifiable: a malicious PHP file named "photo.jpg"
+// and labeled image/jpeg would pass either check and be written to disk.
+// Magic bytes are the first sequence emitted by the format's own writer
+// (JPEG starts FF D8 FF, PNG starts 89 50 4E 47, WebP carries
+// RIFF....WEBP) and cannot be forged without corrupting the image itself;
+// the check runs entirely server-side, so the client has no influence over it.
 func (h *Handler) HandleUploadAvatar(w http.ResponseWriter, r *http.Request) {
 	creatorID := middleware.CreatorID(r)
 	if creatorID == nil {
@@ -175,8 +172,24 @@ func (h *Handler) HandleUploadAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Batas 3MB (2MB file + headroom untuk multipart overhead).
+	// 3 MB limit: the 2 MB file cap plus headroom for multipart overhead.
+	// MaxBytesReader bounds the WHOLE body before the parser buffers it:
+	// ParseMultipartForm's argument only decides when parts spill to disk,
+	// it does NOT cap the request, so without this a multi-GB upload would
+	// fill the temp directory (G120). An over-limit body surfaces as 413
+	// here (image endpoint: the oversized object IS the body, unlike the
+	// JSON handlers where decodeJSON deliberately maps it to 400).
+	r.Body = http.MaxBytesReader(w, r.Body, 3<<20)
+	// #nosec G120 -- the request body is already capped at 3 MB by
+	// MaxBytesReader above, so ParseMultipartForm cannot be fed an
+	// unbounded stream (the rule's concern); its argument only bounds
+	// in-memory buffering before parts spill to disk.
 	if err := r.ParseMultipartForm(3 << 20); err != nil {
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			http.Error(w, "File too large (max 2MB)", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "File too large (max 2MB)", http.StatusBadRequest)
 		return
 	}
@@ -188,7 +201,8 @@ func (h *Handler) HandleUploadAvatar(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Baca 12 byte pertama untuk magic bytes check.
+	// 12 bytes cover every signature checked below, including the WebP
+	// markers at offsets 0 and 8.
 	buf := make([]byte, 12)
 	n, _ := io.ReadFull(file, buf)
 	if n < 4 {
@@ -209,29 +223,36 @@ func (h *Handler) HandleUploadAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Ukuran 2MB — header.Size di-set oleh multipart parser (bukan klien),
-	// tapi tetap validasi berdasarkan isi aktual untuk jaga-jaga.
+	// 2 MB cap: header.Size is set by the multipart parser rather than by
+	// the client, but the actual contents are still checked as a precaution.
 	if header.Size > 2*1024*1024 {
 		http.Error(w, "File too large (max 2MB)", http.StatusBadRequest)
 		return
 	}
 
-	// Rewind — kita sudah konsumsi 12 byte untuk magic check.
+	// Rewind: 12 bytes were already consumed by the magic-byte check.
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		http.Error(w, "Internal error", http.StatusInternalServerError)
 		return
 	}
 
-	// Path: /uploads/avatars/{creator_id}.{ext}
 	avatarPath := fmt.Sprintf("/uploads/avatars/%d.%s", *creatorID, ext)
 	diskPath := filepath.Join("uploads", "avatars", fmt.Sprintf("%d.%s", *creatorID, ext))
 
-	if err := os.MkdirAll(filepath.Dir(diskPath), 0755); err != nil {
+	// #nosec G703,G304 -- diskPath is built from the session's int64
+	// creatorID (formatted %d, never a raw string) plus an extension chosen
+	// from the magic-byte allowlist: no user-controlled path segment reaches
+	// either call, so the taint that flags path traversal cannot be
+	// exercised. 0750: the owner (and web server group) write; group/other
+	// get no write access to the avatar store (G301).
+	if err := os.MkdirAll(filepath.Dir(diskPath), 0750); err != nil {
 		h.Logger.Printf("MkdirAll: %v", err)
 		http.Error(w, "Internal error", http.StatusInternalServerError)
 		return
 	}
 
+	// #nosec G703,G304 -- same derivation as MkdirAll above (int64
+	// creatorID + allowlisted extension), not a user-supplied path.
 	dst, err := os.Create(diskPath)
 	if err != nil {
 		h.Logger.Printf("Create avatar file: %v", err)
@@ -246,10 +267,10 @@ func (h *Handler) HandleUploadAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read current profile lalu merge avatar_url — tidak bisa pakai
-	// UpdateCreatorProfile langsung karena itu full-replace. Baca dari PRIMARY
-	// supaya merge tidak menulis ulang nilai basi dari replica (e.g. socials)
-	// ke primary saat user mengunggah avatar (read-your-own-writes).
+	// Read the current profile and merge in avatar_url: UpdateCreatorProfile
+	// cannot be used directly because it performs a full replace. The read
+	// goes to PRIMARY so the merge does not write stale replica values (e.g.
+	// socials) back to the primary row (read-your-own-writes).
 	creator, err := h.Store.GetCreatorByIDPrimary(*creatorID)
 	if err != nil {
 		http.Error(w, "Database error", http.StatusInternalServerError)
@@ -276,25 +297,30 @@ func (h *Handler) HandleUploadAvatar(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// validThemePreset reports whether the value is one of the four closed
-// preset themes (classic|darkroom|coral|glass). Empty string is
-// INVALID on write — a missing theme in an old client would silently reset
-// another theme to classic; the frontend always sends the full preset list.
-// Preset glass adalah EKSPERIMEN (preset 4) — diputuskan nanti mau
-// dipertahankan permanen atau dibuang; hapus dari sini kalau dibuang.
+// validThemePreset reports whether the value is one of the eleven closed
+// preset themes (classic|darkroom|coral|glass|risoPrint|peach|lavender|
+// matcha|sakura|ocean|sunset). Empty is INVALID on write: a client that
+// omits the theme would silently reset an existing theme to classic, so the
+// frontend always sends one of the presets. The glass preset is an
+// EXPERIMENT (preset 4): decide later whether to keep or drop it; remove it
+// here if it is dropped. Preset risoPrint (preset 5, risograph 2026-09-29),
+// presets 6-9 (peach/lavender/matcha/sakura, playful 2026-09-30) and
+// presets 10-11 (ocean/sunset, 2026-10-01) follow the same pattern: add or
+// remove the value here plus THEMES in lib/themes.js.
 func validThemePreset(t string) bool {
 	switch t {
-	case "classic", "darkroom", "coral", "glass":
+	case "classic", "darkroom", "coral", "glass", "risoPrint",
+		"peach", "lavender", "matcha", "sakura", "ocean", "sunset":
 		return true
 	}
 	return false
 }
 
-// validTheme coerces any non-preset value to "classic" for output. Read path
-// (bukan write) — payload JSON tidak boleh membawa nilai theme yang tidak
-// dikenal frontend. Legacy "night" (nama lama preset darkroom) di-mapping ke
-// "darkroom" supaya baris yang ditulis sebelum rebranding tidak jatuh ke
-// classic.
+// validTheme coerces any non-preset value to "classic" for output. It runs
+// on the read path, never on write: the JSON payload must not carry a theme
+// the frontend does not know. Legacy "night" (the old name of the darkroom
+// preset) maps to "darkroom" so rows written before the rebranding do not
+// fall back to classic.
 func validTheme(t string) string {
 	if t == "night" {
 		return "darkroom"

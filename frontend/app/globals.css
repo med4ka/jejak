@@ -2,37 +2,363 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Signature lama (.laminate-strip) dihapus bersama palet Laminated Pass.
-   Signature baru (§3 "Instant Frame"): border ink tebal + margin bawah
-   Polaroid, diimplementasikan langsung di komponen via utility Tailwind. */
+/* The former signature element (.laminate-strip) was removed together with the
+   Laminated Pass palette. The current signature (§3 "Instant Frame"): a thick
+   ink border plus a Polaroid-style bottom margin: is implemented directly in
+   the components through Tailwind utilities. */
 
-/* Tema "darkroom" (kamar gelap cuci foto) di halaman publik: halaman ditutup
-   div-layout bg-print-white, lalu ProfileLinks menempelkan
-   data-profile-theme ke <body> saat berdiri di /u/[username] (efek scoped ke
-   halaman itu; dibersihkan saat unmount). Warna text tetap dikontrol utility
-   class per-komponen, body hanya butuh background swap supaya tidak ada pita
-   putih di bawah/main di luar konten. #121212 = hitam netral pekat (bukan ink
-   #1C1A12 yang kecoklatan) — esensi konsep darkroom. */
+/* Themes (classic/darkroom/coral/glass/risoPrint/peach/lavender/matcha/sakura/
+   ocean/sunset) on public pages: the layout supplies a global bg-print-white,
+   and ProfileLinks attaches data-profile-theme to <body> while rendering
+   /u/[username] (the only page permitted to set this attribute: dashboard,
+   /app and the landing page stay on Instant Print). The rules below decide the
+   visual background (classic = print-white, coral = cream, darkroom = #121212,
+   glass = gradient). Text colors remain governed by per-component utility
+   classes. The attribute must be cleared on unmount; otherwise, visiting
+   another page after a dark-themed /u/ page would keep the dark background. */
 body[data-profile-theme="classic"] {
   background-color: #FAFAF7;
 }
 
 body[data-profile-theme="coral"] {
-  /* Coral == CLassic fix: coral harus punya panggung sendiri supaya tidak
-     jatuh ke body default (identik dgn classic). Cream hangat #F5F1E8 —
-     beda lembut dari classic #FAFAF7, pas dengan aksen oranye flash-orange. */
+  /* Fix so coral does not collapse onto classic: coral must have its own
+     stage instead of falling back to the default body (identical to classic).
+     Warm cream #F5F1E8: subtly distinct from classic #FAFAF7, pairing well
+     with the flash-orange accent. */
   background-color: #F5F1E8;
 }
 
 body[data-profile-theme="darkroom"] {
+  /* #121212 = deep neutral black (not the brownish ink #1C1A12):
+     the essence of the darkroom concept. */
   background-color: #121212;
 }
 
-/* Tema "glass" (preset 4, ala macOS/iOS Control Center versi TERANG): panggung
-   abu-putih LEMBUT #ECECEC (netral, r≈g≈b) + backdrop radial-gradient terang
-   #F5F5F5→#E8E8E8 (di-render ThemeBackdrop, fixed -z-10) + grain halus 3-5%
-   (div SVG noise opacity rendah di ThemeBackdrop — BUKAN foto noise 15%+).
-   Body cuma fallback solid terang; styling utama ada di ThemeBackdrop. */
+/* "glass" theme (preset 4, Apple-style redesign 2026-09-29): paper =
+   soft 135° linear-gradient #F0F0F0 → #FFFFFF → #F5F5F7 per specification (no
+   longer a radial-gradient in ThemeBackdrop: the gradient moved ONTO the body
+   so the paper color has a single source of truth, like the solid colors of
+   the other themes).
+   background-attachment: fixed → the gradient holds still while scrolling (a
+   native macOS feel), and the background still resolves to the canvas (the
+   body background propagates to <html>), so no white band appears below the
+   content. */
 body[data-profile-theme="glass"] {
-  background-color: #ECECEC;
+  background-color: #F0F0F0;
+  background-image: linear-gradient(135deg, #F0F0F0 0%, #FFFFFF 50%, #F5F5F7 100%);
+  background-attachment: fixed;
+}
+
+/* "risoPrint" theme (preset 5, Risograph 2026-09-29): cream paper #F4F0E6
+   plus an SVG noise layer (fractalNoise, opacity 0.03) as the
+   background-image, exactly matching the "subtle grain overlay" specification.
+   background-attachment: fixed → the grain holds still while scrolling (same
+   pattern as glass). color: ink blue #1F3A5F: text WITHOUT a token (profile
+   bio, etc.) follows the riso ink color instead of ink #1C1A12. */
+body[data-profile-theme="risoPrint"] {
+  background-color: #F4F0E6;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  background-attachment: fixed;
+  color: #1F3A5F;
+}
+
+/* 4 playful/cute themes (presets 6-9, 2026-09-30): a solid stage matching each
+   theme's `page` token, plus a color following the theme ink so that text
+   WITHOUT a token (profile bio, social links, etc.) does not fall back to ink
+   #1C1A12. Same pattern as darkroom/coral/risoPrint: one rule per preset,
+   with no gradient/grain (ThemeBackdrop already provides the subtle global
+   texture). */
+body[data-profile-theme="peach"] {
+  background-color: #FFF1E6;
+  color: #2B1F1A;
+}
+
+body[data-profile-theme="lavender"] {
+  background-color: #F5F0FF;
+  color: #2A2140;
+}
+
+body[data-profile-theme="matcha"] {
+  background-color: #EFF5EC;
+  color: #1F2E1A;
+}
+
+body[data-profile-theme="sakura"] {
+  background-color: #FFF5F8;
+  color: #2B1F26;
+}
+
+/* 2 new themes, Ocean + Sunset (presets 10-11, 2026-10-01): same pattern as
+   the 4 playful themes above: a solid stage matching the `page` token, plus a
+   color following the theme ink (sea blue #0F2A3D / brown #3D1F0F) so that
+   text without a token does not fall back to ink #1C1A12. */
+body[data-profile-theme="ocean"] {
+  background-color: #E8F2F7;
+  color: #0F2A3D;
+}
+
+body[data-profile-theme="sunset"] {
+  background-color: #FFF3E0;
+  color: #3D1F0F;
+}
+
+/* ── Custom scrollbar (polish 2026-09-30, widened 2026-10-03) ────────────
+   The stock browser scrollbar (a thick grey bar) makes a page look
+   unfinished. One system for ALL pages: transparent track, pill thumb
+   with a 3px transparent border + background-clip:content-box (the thumb
+   measures width - 6px visually while the hit area stays full width).
+   Thumb width: 12px below 768px, 14px on desktop. Colors come from the
+   --scrollbar-thumb / --scrollbar-thumb-hover variables:
+     - landing/dashboard (no data-profile-theme) → :root = ink at 70% idle,
+       full strength on hover;
+     - public pages → the accent color of the respective theme (darkroom
+       orange, peach, etc.) so the scrollbar follows the theme on dark
+       backgrounds.
+   Firefox: scrollbar-width:thin + scrollbar-color:thumb track (the same
+   variables, so colors stay consistent). Firefox cannot render the pill
+   shape or pick a pixel width (thin is the finest granularity it allows);
+   that visual difference vs Chrome/Edge is a browser limitation, expected
+   and documented, not a bug. The standard properties are wrapped in
+   @supports not selector(::-webkit-scrollbar): setting scrollbar-width/
+   scrollbar-color on an element DISABLES the ::-webkit-scrollbar pseudo
+   (Chromium would fall back to its stock thin bar and the pill would
+   never render), so Firefox-only browsers get the standard properties
+   while Chromium/Safari keep the pill. Properties stay global so that
+   scrollable elements inside modals (Bulk Import textarea, tab strip,
+   etc.) match as well.
+   Pure CSS, no scrollbar library. */
+:root {
+  --scrollbar-thumb: rgba(28, 26, 18, 0.7);
+  --scrollbar-thumb-hover: #1c1a12;
+}
+
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+@media (min-width: 768px) {
+  ::-webkit-scrollbar {
+    width: 14px;
+    height: 14px;
+  }
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb, #1c1a12);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover, #1c1a12);
+  background-clip: content-box;
+}
+
+/* Standard scrollbar properties: Firefox only. Chromium/Safari must NOT
+   receive them (see comment above), they are styled by ::-webkit-scrollbar
+   from this same stylesheet instead. */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb, #1c1a12) transparent;
+  }
+}
+
+/* Scrollbar colors per public-page theme: layered on top of :root.
+   Values = the theme accent token (see lib/themes.js); hover = a slightly
+   lighter/darker variant so that highlighting the scrollbar gives feedback.
+   The twin selector `html:has(body[...])` is REQUIRED: the theme attribute
+   lives on <body>, but the document scrollbar (WebKit, and Firefox via
+   scrollbar-color) reads the variables from <html>: without :has(), public
+   pages would keep using the :root colors. */
+html:has(body[data-profile-theme="classic"]),
+body[data-profile-theme="classic"] {
+  --scrollbar-thumb: #1c1a12;
+  --scrollbar-thumb-hover: #000000;
+}
+
+html:has(body[data-profile-theme="darkroom"]),
+body[data-profile-theme="darkroom"] {
+  --scrollbar-thumb: #ff6b35;
+  --scrollbar-thumb-hover: #ff8a5c;
+}
+
+html:has(body[data-profile-theme="coral"]),
+body[data-profile-theme="coral"] {
+  --scrollbar-thumb: #1c1a12;
+  --scrollbar-thumb-hover: #000000;
+}
+
+html:has(body[data-profile-theme="glass"]),
+body[data-profile-theme="glass"] {
+  --scrollbar-thumb: rgba(28, 26, 18, 0.5);
+  --scrollbar-thumb-hover: rgba(28, 26, 18, 0.9);
+}
+
+html:has(body[data-profile-theme="risoPrint"]),
+body[data-profile-theme="risoPrint"] {
+  --scrollbar-thumb: #1f3a5f;
+  --scrollbar-thumb-hover: #2c5380;
+}
+
+html:has(body[data-profile-theme="peach"]),
+body[data-profile-theme="peach"] {
+  --scrollbar-thumb: #ff9b7b;
+  --scrollbar-thumb-hover: #ffb59c;
+}
+
+html:has(body[data-profile-theme="lavender"]),
+body[data-profile-theme="lavender"] {
+  --scrollbar-thumb: #a88beb;
+  --scrollbar-thumb-hover: #bfa9f3;
+}
+
+html:has(body[data-profile-theme="matcha"]),
+body[data-profile-theme="matcha"] {
+  --scrollbar-thumb: #7ba05b;
+  --scrollbar-thumb-hover: #96b878;
+}
+
+html:has(body[data-profile-theme="sakura"]),
+body[data-profile-theme="sakura"] {
+  --scrollbar-thumb: #f5a4b8;
+  --scrollbar-thumb-hover: #f9c4d2;
+}
+
+html:has(body[data-profile-theme="ocean"]),
+body[data-profile-theme="ocean"] {
+  --scrollbar-thumb: #4a90b8;
+  --scrollbar-thumb-hover: #2a6a8a;
+}
+
+html:has(body[data-profile-theme="sunset"]),
+body[data-profile-theme="sunset"] {
+  --scrollbar-thumb: #f5a623;
+  --scrollbar-thumb-hover: #c77800;
+}
+
+/* ── Link-card tilt (mobile polish 2026-09-30) ──────────────────────────
+   Link cards are tilted ±2° by design (deterministic, derived from the link
+   index). On narrow screens that tilt enlarges the card's bounding box, which
+   lets the card corner/heart element cross the viewport edge. The .tilt-wrap
+   wrapper carries the angle in the custom property --tilt and dampens it on
+   small screens: ±2° on desktop → ±0.6° at ≤640px
+   (rotate(calc(deg * 0.3))). framer-motion inside the card still owns
+   entrance/hover; this wrapper is pure CSS. */
+.tilt-wrap {
+  transform: rotate(var(--tilt, 0deg));
+}
+
+@media (max-width: 640px) {
+  .tilt-wrap {
+    transform: rotate(calc(var(--tilt, 0deg) * 0.3));
+  }
+}
+
+/* The caption font (Caveat, handwritten) is FORBIDDEN for riso (specification:
+   it reads as a cartoon, not a risograph) → replaced by JetBrains Mono, and only
+   while the body carries the riso theme.
+   The specificity of body[data-...] .font-caption (0,2,1) beats the Tailwind
+   utility .font-caption (0,1,0), so no !important is required. */
+body[data-profile-theme="risoPrint"] .font-caption {
+  font-family: var(--font-mono), monospace;
+}
+
+/* Riso link cards: cream paper with its own grain (opacity 0.03). The global
+   ThemeBackdrop grain (4%) sits BEHIND the cards (fixed -z-10): opaque cards
+   cover it, so the paper texture must be part of the card's own background. */
+.riso-paper {
+  background-color: #F4F0E6;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+}
+
+/* Horizontal scrolling is blocked at every breakpoint (mobile audit
+   320/375/414/768): CLIP, not hidden: hidden turns the body into a scroll
+   container and can "capture" scrolling for fixed elements (the navbar); clip
+   trims overflow without creating a scroll container, so the fixed navbar
+   keeps its correct position. */
+html,
+body {
+  overflow-x: clip;
+}
+
+/* Smooth scrolling for navbar anchor links (#fitur, #demo, #faq): sections do
+   not jump instantly and do not land underneath the fixed navbar pill
+   (scroll-mt-24 on each section compensates for the navbar height). */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Skeleton shimmer (Apple detail #6): the <Skeleton> component lives in
+   app/components/Skeleton.jsx. Base ink/8; a highlight band (transparent →
+   translucent white → transparent) sweeps left → right on a 1.5s loop.
+   Default border-radius 8px (the height is set by the caller through h-*
+   classes). */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  border-radius: 8px;
+  background-color: rgba(28, 26, 18, 0.08); /* ink/8 */
+}
+
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.7) 50%,
+    transparent 100%
+  );
+  animation: shimmer 1.5s linear infinite;
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Hover lift for link rows in the dashboard's "Link Saya" tab (Apple detail
+   #4: translateY -4px + shadow → 6px + opacity 90%). Moved here from Tailwind
+   hover:* utilities for two reasons:
+   (1) @media (hover: hover) and (pointer: fine): on touch screens :hover
+       STICKS after a tap, so the touched card (e.g. the first row) stays
+       silently lifted and rows appear misaligned. Touch devices do not need a
+       hover lift in the first place.
+   (2) One transform system: dnd-kit writes style.transform inline while
+       dragging. Inline styles always win over CSS, so the CSS lift does not
+       participate during a drag; when idle (transform=null, the style is not
+       set) the CSS lift applies.
+   The 150ms transition comes from the `transition duration-150` class on the
+   row. */
+@media (hover: hover) and (pointer: fine) {
+  .link-lift:hover {
+    transform: translateY(-4px);
+    box-shadow: 6px 6px 0px #1C1A12;
+    opacity: 0.9;
+  }
+}
+
+/* prefers-reduced-motion: (1) disable smooth scrolling; (2) disable the
+   skeleton shimmer (non-essential animation); (3) the global framer-motion
+   behaviour: all animations collapse to opacity-only: is handled by
+   MotionProvider (MotionConfig reducedMotion="user") in lib/, not by this
+   stylesheet. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .skeleton::after {
+    animation: none;
+  }
 }

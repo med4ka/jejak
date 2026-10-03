@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 
 const GO_API_URL = process.env.GO_API_URL || "http://localhost:8081";
 
-// Proxy reorder -> Go PUT /api/links/reorder. Cookie sesi diteruskan
-// (Go menolak tanpa login + memverifikasi kepemilikan tiap baris).
+// Proxy reorder -> Go PUT /api/links/reorder. The session cookie is forwarded
+// (Go rejects unauthenticated requests and verifies ownership of every row).
 export async function PUT(req) {
   const cookie = req.headers.get("cookie") || "";
   let body;

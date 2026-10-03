@@ -8,17 +8,22 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// LEARN:
-//   Kenapa: Interface ini mendefinisikan operasi cache-aside pattern untuk URL shortener.
-//   Konsep design yang terkait: cache-aside vs write-through - pola di mana aplikasi
-//   cek cache dulu, kalau miss baru query DB lalu isi cache. Paling umum dipakai.
-//   Trade-off: Cache-aside (lazy loading) lebih sederhana, latency read jadi 2x (cache miss
-//   -> DB query), tapi write lebih cepat. Write-through malah menambah latency write.
-//   Alternatif: Bisa pakai write-through untuk data kritis, tapi overhead write jadi besar
-//   untuk URL shortener yang read-ceptional.
+// Cache defines the cache-aside operations for the URL shortener.
+// Rationale: cache-aside versus write-through: the application checks the
+// cache first and only on a miss queries the database, then fills the cache;
+// this is by far the most common pattern. Trade-off: cache-aside (lazy
+// loading) is simpler and writes stay fast, but a miss doubles read latency
+// (cache miss → database query). Write-through adds write latency instead.
+// Alternative: write-through for critical data, but the write overhead is too
+// high for a URL shortener that is overwhelmingly read-heavy.
 type Cache interface {
+	// Get returns (value, true) on a hit; a miss or backend error returns
+	// ("", false) - never a hard error (the caller falls through to the DB).
 	Get(shortCode string) (string, bool)
+	// Set stores the value with a TTL; returns the backend error when it
+	// fails (the entry then does not exist).
 	Set(shortCode, originalURL string, ttlSeconds int64) error
+	// Delete evicts one key; a key that does not exist is not an error.
 	Delete(shortCode string) error
 }
 
@@ -28,12 +33,12 @@ type RedisCache struct {
 	ctx    context.Context
 }
 
-// LEARN:
-//   Kenapa: Membungkus *redis.Client yang sudah ada (dipakai juga untuk queue)
-//   supaya cache dan queue berbagi 1 koneksi pool, bukan buka koneksi ganda.
-//   Trade-off: Cache ikut mati kalau client queue bermasalah (shared fate),
-//   tapi hemat koneksi dan config cukup 1 REDIS_URL.
-//   Alternatif: Client terpisah untuk cache vs queue (isolasi), tapi 2x koneksi.
+// NewCacheFromClient wraps an existing *redis.Client (also used for the
+// queue) so cache and queue share one connection pool instead of opening
+// separate connections. Trade-off: the cache dies with a faulty queue client
+// (shared fate), but connections are saved and configuration needs only one
+// REDIS_URL. Alternative: a separate client for cache versus queue (isolation)
+// at the cost of twice the connections.
 func NewCacheFromClient(client *redis.Client) *RedisCache {
 	return &RedisCache{
 		client: client,
@@ -64,7 +69,9 @@ func (c *RedisCache) Get(shortCode string) (string, bool) {
 	return val, true
 }
 
-// Set stores a value in cache with a TTL (in seconds).
+// Set stores a value in cache with a TTL (in seconds). Returns the Redis
+// error when SET fails (the entry then does not exist, so the next read is a
+// miss); a key that already exists is simply overwritten, never an error.
 func (c *RedisCache) Set(shortCode, originalURL string, ttlSeconds int64) error {
 	err := c.client.Set(c.ctx, shortCode, originalURL, time.Duration(ttlSeconds)*time.Second).Err()
 	if err != nil {
@@ -73,7 +80,8 @@ func (c *RedisCache) Set(shortCode, originalURL string, ttlSeconds int64) error 
 	return nil
 }
 
-// Delete removes a value from cache.
+// Delete removes a value from cache. Returns the Redis error when DEL fails;
+// a key that does not exist is not an error (DEL of an absent key succeeds).
 func (c *RedisCache) Delete(shortCode string) error {
 	err := c.client.Del(c.ctx, shortCode).Err()
 	if err != nil {

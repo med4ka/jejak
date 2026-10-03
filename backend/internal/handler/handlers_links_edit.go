@@ -5,15 +5,32 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"jejak/internal/middleware"
 )
 
+// optionalTime represents the 3 cases of the expires_at field on PUT
+// /api/links/{code}:
+//
+//   - field not sent      → Set=false, T=nil  (do not touch the DB)
+//   - "expires_at": null  → Set=true,  T=nil  (CLEAR: remove the expiry)
+//   - "expires_at": "..." → Set=true,  T=&t   (set/change, RFC3339 → UTC)
+//
+// json.RawMessage is used (rather than UnmarshalJSON on a pointer) so the
+// "null" case behaves deterministically: encoding/json has a null-vs-pointer
+// edge case that is easy to misread; RawMessage distinguishes absent (len 0)
+// vs "null" vs string explicitly.
+type optionalTime struct {
+	Set bool
+	T   *time.Time
+}
+
 // HandleClaimLinks lets a just-logged-in creator claim anonymous links made
 // in THIS browser (POST /api/links/claim, body {"short_codes": [...]}).
-// Auth required; store only flips rows that are still ownerless
-// (see LEARN on ClaimLinks — owned links can never be stolen this way).
-// Returns {"claimed": n}; unknown/already-owned codes count 0, not an error.
+// Auth required; the store only flips rows that are still ownerless
+// (see the rationale on ClaimLinks: owned links can never be stolen this way).
+// Returns {"claimed": n}; unknown or already-owned codes count 0, not an error.
 func (h *Handler) HandleClaimLinks(w http.ResponseWriter, r *http.Request) {
 	creatorID := middleware.CreatorID(r)
 	if creatorID == nil {
@@ -77,9 +94,10 @@ func normalizeTags(raw []string) ([]string, bool) {
 }
 
 // HandleReorderLinks saves a new link order (PUT /api/links/reorder).
-// Body: {"order": ["codeA", "codeB", ...]} — position = index in array.
-// Auth required; store scopes every row to the caller (link orang lain -> 404,
-// bukan 403, supaya tidak membocorkan keberadaan short-code orang).
+// Body: {"order": ["codeA", "codeB", ...]}: position = index in array.
+// Auth required; the store scopes every row to the caller (another user's
+// link -> 404, not 403, so the existence of someone else's short code is not
+// disclosed).
 func (h *Handler) HandleReorderLinks(w http.ResponseWriter, r *http.Request) {
 	creatorID := middleware.CreatorID(r)
 	if creatorID == nil {
@@ -118,18 +136,25 @@ func (h *Handler) HandleReorderLinks(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleUpdateLink edits an owned link (PUT /api/links/{short_code}):
-// device_rules (Smart Link), tags, is_featured (link unggulan), dan is_active
-// (disable/enable) dalam 1 endpoint. Setiap field opsional (pointer) — field
-// yang tidak dikirim TIDAK disentuh, supaya toggle "unggulan" / "nonaktifkan"
-// dari dashboard tidak menghapus device_rules/tags yang ada. Field yang
-// dikirim = full-replace (mirip dengan HandleUpdateMyProfile). Auth wajib;
-// scope ke baris milik sendiri (WHERE creator_id) — link orang lain / kode
-// kosong → 404 (bukan 403, jangan bocorkan keberadaan short-code orang). URL
-// rules divalidasi http(s) kalau diisi; kalau kosong = fallback ke
-// original_url. Featured di-set lewat transaksi radio di store (1 per
-// creator). is_active=off menonaktifkan URL publik (redirect menjawab 410,
-// lihat HandleRedirect — Fase 13 lifecycle). Cache di-invalidate sesudah
-// update supaya redirect berikutnya baca device_rules/is_active terbaru.
+// device_rules (Smart Link), tags, is_featured (featured link), and is_active
+// (disable/enable) in a single endpoint. Every field is optional (pointer):
+// fields that are not sent are NOT touched, so a dashboard "feature" or
+// "disable" toggle never wipes the existing device_rules/tags. A sent field =
+// full-replace (similar to HandleUpdateMyProfile). Auth mandatory; scoped to
+// the caller's own rows (WHERE creator_id): another user's link / empty code
+// → 404 (not 403, to avoid disclosing the existence of someone else's short
+// code). Rule URLs are validated as http(s) when set; empty = fallback to
+// original_url. Featured is set through a radio transaction in the store (1
+// per creator). is_active=off disables the public URL (the redirect answers
+// 410, see HandleRedirect: Phase 13 lifecycle). The cache is invalidated
+// after the update so the next redirect reads the latest
+// device_rules/is_active.
+//
+// Link management (2026-09-30): added expires_at (optional, optionalTime:
+// see that type). The frontend ONLY sends this field when the value CHANGES
+// (an already-expired old link sends nothing → no 422); clear = null.
+// Malformed format → 400, valid but <= 1 hour from now → 422 + field error
+// (same as doShorten: the same UTC rule).
 func (h *Handler) HandleUpdateLink(shortCode string, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -146,14 +171,42 @@ func (h *Handler) HandleUpdateLink(shortCode string, w http.ResponseWriter, r *h
 		Tags        *[]string          `json:"tags"`
 		IsFeatured  *bool              `json:"is_featured"`
 		IsActive    *bool              `json:"is_active"`
+		ExpiresAt   json.RawMessage    `json:"expires_at"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-	if req.DeviceRules == nil && req.Tags == nil && req.IsFeatured == nil && req.IsActive == nil {
+	if req.DeviceRules == nil && req.Tags == nil && req.IsFeatured == nil && req.IsActive == nil && len(req.ExpiresAt) == 0 {
 		http.Error(w, "Nothing to update", http.StatusBadRequest)
 		return
+	}
+
+	// expires_at: 3 cases (see optionalTime). RFC3339 → UTC; must be > 1 hour
+	// from now (422 otherwise): consistent with doShorten.
+	expires := optionalTime{}
+	if len(req.ExpiresAt) > 0 {
+		if string(req.ExpiresAt) == "null" {
+			expires.Set = true // clear
+		} else {
+			var s string
+			if err := json.Unmarshal(req.ExpiresAt, &s); err != nil {
+				writeFieldError(w, http.StatusBadRequest, "expires_at", "expires_at must be RFC3339 UTC or null")
+				return
+			}
+			t, err := time.Parse(time.RFC3339, s)
+			if err != nil {
+				writeFieldError(w, http.StatusBadRequest, "expires_at", "expires_at must be RFC3339 UTC (contoh: 2026-10-01T09:00:00Z)")
+				return
+			}
+			u := t.UTC()
+			if !u.After(time.Now().UTC().Add(time.Hour)) {
+				writeFieldError(w, http.StatusUnprocessableEntity, "expires_at", "expires_at must be more than 1 hour in the future")
+				return
+			}
+			expires.Set = true
+			expires.T = &u
+		}
 	}
 
 	if req.DeviceRules != nil {
@@ -190,8 +243,8 @@ func (h *Handler) HandleUpdateLink(shortCode string, w http.ResponseWriter, r *h
 		return
 	}
 
-	// UpdateLink dipanggil hanya kalau ada field smart link/tags yang dikirim —
-	// toggle featured saja tidak boleh menimpa data rules/tags existing.
+	// UpdateLink runs only when smart-link/tags fields were sent: a
+	// featured-only toggle must not overwrite existing rules/tags data.
 	if req.DeviceRules != nil || req.Tags != nil {
 		if err := h.Store.UpdateLink(*creatorID, shortCode, string(rulesJSON), string(tagsJSON)); err != nil {
 			if err == sql.ErrNoRows {
@@ -216,10 +269,10 @@ func (h *Handler) HandleUpdateLink(shortCode string, w http.ResponseWriter, r *h
 		}
 	}
 
-	// Toggle is_active (disable/enable) bukan bagian dari UpdateLink: kolom
-	// terpisah dan tidak boleh menimpa rules/tags. Endpoint publik redirect
-	// akan menjawab 410 untuk link yang di-disable (lihat HandleRedirect);
-	// dashboard tetap menampilkannya supaya bisa di hidupkan kembali.
+	// The is_active toggle (disable/enable) is not part of UpdateLink: it is a
+	// separate column and must not overwrite rules/tags. The public redirect
+	// endpoint answers 410 for a disabled link (see HandleRedirect); the
+	// dashboard still lists it so it can be re-enabled.
 	if req.IsActive != nil {
 		if err := h.Store.SetLinkActive(*creatorID, shortCode, *req.IsActive); err != nil {
 			if err == sql.ErrNoRows {
@@ -232,8 +285,23 @@ func (h *Handler) HandleUpdateLink(shortCode string, w http.ResponseWriter, r *h
 		}
 	}
 
-	// Stale cache tidak lagi cocok dengan DB -> buang supaya redirect berikutnya
-	// membaca device_rules terbaru (cache-aside invalidate-on-write).
+	// expires_at: Set → write the value OR clear it (T=nil when null). Scoped
+	// in the store (WHERE creator_id) → another user's link = 404, consistent
+	// with the other update paths.
+	if expires.Set {
+		if err := h.Store.SetLinkExpiry(*creatorID, shortCode, expires.T); err != nil {
+			if err == sql.ErrNoRows {
+				http.Error(w, "Unknown short code or not yours", http.StatusNotFound)
+				return
+			}
+			h.Logger.Printf("SetLinkExpiry failed for %q: %v", shortCode, err)
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// The stale cache no longer matches the DB -> discard it so the next
+	// redirect reads the latest device_rules (cache-aside invalidate-on-write).
 	if h.Cache != nil {
 		if err := h.Cache.Delete(shortCode); err != nil {
 			h.Logger.Printf("Warning: failed to invalidate cache for %q: %v", shortCode, err)

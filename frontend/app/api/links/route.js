@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 
 const GO_API_URL = process.env.GO_API_URL || "http://localhost:8081";
 
-// Proxy same-origin -> Go API GET /api/links (link milik user yang login;
-// sesi diteruskan supaya server bisa scope per-creator).
+// Same-origin proxy -> Go API GET /api/links (links owned by the logged-in
+// user; the session is forwarded so the server can scope results per creator).
 export async function GET(req) {
   const cookie = req.headers.get("cookie") || "";
   let goRes;

@@ -8,14 +8,15 @@ import (
 	"jejak/internal/ratelimit"
 )
 
-// LEARN:
-//
-//	Kenapa: Register + auto-login dalam 1 call (UX: langsung bisa bikin link).
-//	Username unik dijamin UNIQUE constraint DB (bukan cek-then-insert race);
-//	password tidak pernah disimpan plaintext (bcrypt via auth package).
-//	Trade-off: Auto-login berarti register selalu membuat session (1 write memori
-//	ekstra); respons 201 mengembalikan profil TANPA hash (jangan pernah echo hash).
-//	Alternatif: Email verification / OTP, tapi overkill untuk akun kreator MVP.
+// HandleRegister creates the account and logs the creator in within a single
+// call, so link creation can start immediately after signup. Uniqueness of
+// the username is enforced by the database UNIQUE constraint rather than a
+// check-then-insert sequence (no race), and the password is never stored in
+// plaintext (bcrypt via the auth package). Trade-off: auto-login means every
+// registration also creates a session (one extra in-memory write), and the
+// 201 response returns the profile without the hash: the hash must never be
+// echoed. Email verification / OTP was rejected as overkill for an MVP
+// creator account.
 func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -24,6 +25,22 @@ func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	if h.Auth == nil {
 		http.Error(w, "Auth not configured", http.StatusInternalServerError)
 		return
+	}
+
+	// Account-spam / CPU throttle: 10 registrations/minute per IP. Unlike
+	// login, EVERY attempt is recorded (no credential separates a "failed"
+	// from a "succeeded" attempt at this point): a flood of duplicate
+	// usernames must drain the bucket just like valid signups, otherwise an
+	// attacker could submit endless taken usernames for free. Checked before
+	// decode+bcrypt so an attacker cannot burn CPU.
+	rlKey := "reg\x00" + ratelimit.ClientIP(r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
+	if h.RegisterLimiter != nil {
+		if !h.RegisterLimiter.Allow(rlKey) {
+			w.Header().Set("Retry-After", "60")
+			http.Error(w, "Too many registration attempts, try again later", http.StatusTooManyRequests)
+			return
+		}
+		h.RegisterLimiter.Record(rlKey)
 	}
 
 	var req struct {
@@ -92,8 +109,9 @@ func (h *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Throttle brute force: 5 gagal/menit per IP+username (lihat LEARN di
-	// ratelimit package). Cek SEBELUM bcrypt supaya CPU tidak dibakar penyerang.
+	// Brute-force throttle: 5 failures/minute per IP+username (rationale in
+	// the ratelimit package). Checked BEFORE bcrypt so an attacker cannot
+	// burn CPU.
 	rlKey := ratelimit.Key(ratelimit.ClientIP(r.RemoteAddr, r.Header.Get("X-Forwarded-For")), req.Username)
 	if h.LoginLimiter != nil && !h.LoginLimiter.Allow(rlKey) {
 		w.Header().Set("Retry-After", "60")
@@ -125,8 +143,9 @@ func (h *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleLogout revokes the server-side session AND clears the client cookie.
-// Both halves matter: cookie tanpa server entry = mati; entry tanpa clear
-// cookie = browser ngirim token mati terus (harmless tapi berisik di log).
+// Both halves matter: a cookie without a server entry is dead anyway, while
+// an entry left behind without clearing the cookie makes the browser keep
+// sending a dead token: harmless but noisy in the logs.
 func (h *Handler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

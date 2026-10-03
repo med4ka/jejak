@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 
 const GO_API_URL = process.env.GO_API_URL || "http://localhost:8081";
 
-// Proxy POST multipart upload avatar -> Go. Body FormData diteruskan mentah
-// (termasuk boundary di Content-Type) supaya Go bisa parse magic bytes-nya,
-// dan cookie sesi WAJIB diteruskan agar Go tidak menjawab 401. Set-Cookie
-// balasan diteruskan keluar, simetris dengan route auth lain.
+// Proxy for the multipart POST avatar upload -> Go. The FormData body is
+// forwarded raw (including the boundary in Content-Type) so Go can parse its
+// magic bytes, and the session cookie MUST be forwarded so Go does not answer
+// 401. The reply Set-Cookie is forwarded outbound, symmetric with the other
+// auth routes.
 export async function POST(req) {
   const cookie = req.headers.get("cookie") || "";
   const contentType = req.headers.get("content-type") || "";

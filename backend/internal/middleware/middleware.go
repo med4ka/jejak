@@ -1,4 +1,4 @@
-// Package middleware wirves cross-cutting HTTP concerns (session auth, rate
+// Package middleware wires cross-cutting HTTP concerns (session auth, rate
 // limiting) OUT of the handlers so each handler only does business logic.
 // Auth middleware resolves the session cookie into a creator id stored on the
 // request context; handlers read it via CreatorID instead of parsing cookies
@@ -38,7 +38,7 @@ func WithCreator(r *http.Request, creatorID int64) *http.Request {
 // authFromRequest validates the session cookie against the store and, on a
 // successful hit, re-issues the cookie with a fresh expiry so the browser
 // cookie and the server-side TTL (already slid inside Store.Get) never drift
-// apart. Nil store behaves as anonymous (fail safe — auth disabled).
+// apart. Nil store behaves as anonymous (fail safe: auth disabled).
 func authFromRequest(st auth.Store, w http.ResponseWriter, r *http.Request) *int64 {
 	if st == nil {
 		return nil

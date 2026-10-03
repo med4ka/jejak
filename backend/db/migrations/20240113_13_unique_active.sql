@@ -1,19 +1,22 @@
 -- +goose Up
--- Fase 13 (improvement pass #2): analytics jujur + lifecycle link.
--- 1. unique_click_count: counter harian-unik per link (dedup by IP+UA, window 24h).
---    click_count tetap = total klik manusia; unique_click_count = klik dari visitor
---    berbeda. Ini meniru "total clicks vs unique clicks" punya bit.ly tanpa
---    menambah tabel visitor: flag is_unique diflush dari handler via Redis SETNX.
--- 2. is_active: hard-disable link tanpa menghapus (mirip bit.ly "deactivate"):
---    redirect => 410 Gone, halaman publik menyembunyikannya, dashboard bisa
---    menyalakan lagi. Hapus permanen tetap ada (DELETE endpoint baru).
--- 3. click_events.is_unique + referrer_domain: menyimpan metadata klik yang
---    sebelumnya langsung dibuang — analitik bisa nanti breakdown referrer/source.
--- 4. klik_events.clicked_at sekarang diisi EKSPLISIT dari worker (sebelumnya
---    DEFAULT CURRENT_TIMESTAMP = waktu PROSES, bukan waktu klik sebenarnya;
---    menggeser chart 30-hari saat backlog). Kolom sudah ada, cukup dipakai header.
--- Index compound (short_code, clicked_at) mempercepat query ClicksByDay
--- yang selalu filter 30 hari + join per short_code.
+-- Fase 13 (improvement pass #2): honest analytics + link lifecycle.
+-- 1. unique_click_count: per-link daily-unique counter (dedup by IP+UA, 24h
+--    window). click_count stays = total human clicks; unique_click_count =
+--    clicks from distinct visitors. This mirrors bit.ly's "total clicks vs
+--    unique clicks" without adding a visitor table: the is_unique flag is
+--    flushed from the handler through Redis SETNX.
+-- 2. is_active: hard-disable a link without deleting it (like bit.ly's
+--    "deactivate"): redirect => 410 Gone, the public page hides it, and the
+--    dashboard can switch it back on. Permanent deletion still exists (the
+--    new DELETE endpoint).
+-- 3. click_events.is_unique + referrer_domain: click metadata that was
+--    previously thrown away - analytics can break down referrer/source later.
+-- 4. click_events.clicked_at is now filled EXPLICITLY by the worker (it used
+--    to be DEFAULT CURRENT_TIMESTAMP = PROCESS time, not the real click time,
+--    which shifted the 30-day chart whenever a backlog built up). The column
+--    already existed; this migration simply starts using it.
+-- The compound index (short_code, clicked_at) speeds up ClicksByDay, which
+-- always filters to 30 days and joins per short_code.
 
 ALTER TABLE urls ADD COLUMN unique_click_count BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE urls ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE;

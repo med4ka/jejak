@@ -3,7 +3,11 @@ package db
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
+	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -12,32 +16,16 @@ import (
 	"jejak/internal/shortener"
 )
 
-// LEARN:
-//
-//	Kenapa: Interface ini mendefinisikan operasi basis data terstruktur (sharded).
-//	Konsep design yang terkait: Sharding - membagi data ke beberapa database berbeda
-//	supaya 1 database tidak menanggung semua beban (write bottleneck). Setiap operasi
-//	(Create, Get, Increment) akan di-route ke shard yang tepat berdasarkan hash short_code.
-//	Trade-off: Query menjadi lebih kompleks karena butuh logika routing ke shard.
-//	Setiap short_code selalu ke shard yang sama (deterministic), tapi jika ingin menambah
-//	shard ke-3, perlu rebalancing data yang ada. Jika tidak ada handling, data bisa jadi
-//	hilang di shard yang salah.
-//	Alternatif: Consistent hashing fleksibel untuk menambah shard, tapi implementasi lebih rumit.
-//
-// Link is one row for the dashboard list (Fase 8 reads from replica).
-// Position drives creator-page order (reorder feature); 0 = never reordered.
-// LEARN:
-//
-//	Kenapa tags JADI SATU kolom JSONB, bukan tabel tags terpisah: tag di sini
-//	kecil (maks 5/link), selalu dibaca bersama link-nya (tidak pernah query
-//	mandiri), dan tidak pernah di-query lintas creator ("semua link tag X di
-//	seluruh platform" bukan use case). Tabel terpisah = JOIN + migration +
-//	CRUD ekstra tanpa manfaat — normalisasi demi normalisasi.
-//	Trade-off: Tidak ada UNIQUE per tag di DB; validasi (maks 5, ≤20 char,
-//	lowercase) di application layer. Kalau nanti butuh "top tags global",
-//	full-scan + agregat akan mahal — saat itu baru migrasi ke tabel.
-//	Alternatif: Tabel link_tags(link, tag) + tabel tags — benar untuk sistem
-//	tagging skala besar, over-engineering untuk JC ini.
+// Link is one row of the dashboard link list (Fase 8 reads from the replica).
+// Position drives creator-page order (reorder feature); 0 means never
+// reordered. Tags live in a single JSONB column instead of a tags table: they
+// are small (max 5 per link), always read together with their link, and never
+// queried across creators, so a separate table would only add joins,
+// migrations, and extra CRUD without benefit. Trade-off: no per-tag UNIQUE
+// constraint in the database - validation (max 5 tags, <=20 chars, lowercase)
+// runs in the application layer, and a future "top tags global" query would be
+// an expensive full scan; migrate to a real tags table only when that use case
+// appears.
 type Link struct {
 	ShortCode        string            `json:"short_code"`
 	OriginalURL      string            `json:"original_url"`
@@ -48,20 +36,79 @@ type Link struct {
 	IsActive         bool              `json:"is_active"`
 	Tags             []string          `json:"tags"`
 	DeviceRules      map[string]string `json:"device_rules,omitempty"`
+	// ExpiresAt (migration 15) is when the link stops redirecting (NULL means
+	// no limit). It is always UTC: writes use time.Now().UTC() or a UTC value
+	// from the client, and pgx reads a TIMESTAMP without time zone as UTC.
+	ExpiresAt *time.Time `json:"expires_at"`
+	// Status is derived from ExpiresAt when the row is READ (active = no
+	// expiry, scheduled = still in the future, expired = already past). It is
+	// computed in scanLinks so every list reader (dashboard, public profile,
+	// API) agrees on the value without recomputing the rule per handler.
+	Status string `json:"status"`
 }
 
-// ClickEvent is ONE persisted click (Fase 13). Sebelumnya LogClick hanya
-// menerima (short_code, referrer) dan timestap diambil dari DEFAULT CURRENT_TIMESTAMP
-// saat worker INSERT — yang berarti clicked_at = waktu PROSES, bukan waktu user
-// klik. Sekarang handler/worker mengirim event lengkap: clicked_at eksplisit
-// (waktu klik asli), is_unique (visitor berbeda, window 24h ala bit.ly),
-// referrer_domain (host referrer tanpa path — dasar breakdown analitik).
+// BulkURL is one input row of CreateURLsBatch, already validated by the
+// handler: an http(s) URL, a code that is valid and unique within the batch,
+// and tags JSON ready to write.
+type BulkURL struct {
+	ShortCode   string
+	OriginalURL string
+	TagsJSON    string
+	ExpiresAt   *time.Time // always UTC; a bulk import without expiry passes nil
+}
+
+// ClickEvent is one persisted click (Fase 13). LogClick previously accepted
+// only (short_code, referrer) and took the timestamp from DEFAULT
+// CURRENT_TIMESTAMP at worker INSERT time, so clicked_at recorded the PROCESS
+// time rather than the moment the user clicked. Handlers and workers now send
+// the full event: an explicit clicked_at (the real click time), is_unique (a
+// different visitor within a 24h window, bit.ly-style), and referrer_domain
+// (the referrer host without its path - the basis for analytics breakdowns).
 type ClickEvent struct {
 	ShortCode      string
 	Referrer       string
 	ReferrerDomain string
 	IsUnique       bool
 	ClickedAt      time.Time
+	// UserAgent, DeviceType, ReferrerType (migration 16) are analytics
+	// dimensions classified at WRITE time rather than at read time, so a
+	// dashboard breakdown is a plain GROUP BY - no regex per request and no
+	// shipping whole rows to the application. The raw UA is truncated to 512
+	// characters (VARCHAR(512) counts characters, not bytes) so a crawler with
+	// a very long UA cannot trigger a truncation error.
+	UserAgent    string
+	DeviceType   string // bot|tablet|mobile|desktop|unknown (classifyDevice)
+	ReferrerType string // direct|search|social|chat|other (classifyReferrer)
+}
+
+// BreakdownItem is one bucket of a device/referrer breakdown: the label plus
+// how many clicks fell into it inside the requested window. Keys are already
+// normalized at write time, so handlers can pass them straight to JSON.
+type BreakdownItem struct {
+	Key   string `json:"key"`
+	Count int64  `json:"count"`
+}
+
+// LinkExportRow is one row of the "links" CSV export: the link itself plus
+// its click/unique counts INSIDE the export window (not all-time counters -
+// exported numbers must match the range the user selected).
+type LinkExportRow struct {
+	ShortCode    string
+	OriginalURL  string
+	Tags         []string
+	Clicks       int64
+	UniqueClicks int64
+}
+
+// ClickRow is one raw click event for the "clicks" CSV export (the largest
+// mode - capped by the handler through limit; see ExportRowCap).
+type ClickRow struct {
+	ClickedAt      time.Time
+	ShortCode      string
+	DeviceType     string
+	ReferrerType   string
+	ReferrerDomain string
+	IsUnique       bool
 }
 
 // parseRules decodes the device_rules JSONB document. Corrupt/empty/'{}' -> nil
@@ -77,17 +124,33 @@ func parseRules(raw sql.NullString) map[string]string {
 	return nil
 }
 
+// LinkStatus maps expires_at to a list status: NULL -> "active", still ahead
+// -> "scheduled", already past -> "expired" (rule agreed on 2026-09-30). The
+// comparison uses time.After on absolute instants, so the zone of origin (UTC
+// in the database, local in tests) cannot change the result.
+func LinkStatus(expiresAt *time.Time, now time.Time) string {
+	if expiresAt == nil {
+		return "active"
+	}
+	if now.After(*expiresAt) {
+		return "expired"
+	}
+	return "scheduled"
+}
+
 // scanLinks reads link rows (SELECT must include is_featured AND
 // COALESCE(tags,'[]') AS tags AND COALESCE(device_rules,'{}') AS device_rules
-// AND unique_click_count AND is_active). Corrupt JSON fails soft to empty
-// (1 baris rusak tidak boleh merobohkan seluruh list).
+// AND unique_click_count AND is_active AND expires_at). Corrupt JSON fails
+// soft to empty: one broken row must never take the whole list down.
 func scanLinks(rows *sql.Rows) ([]Link, error) {
 	var out []Link
+	now := time.Now().UTC()
 	for rows.Next() {
 		var l Link
 		var tags sql.NullString
 		var rules sql.NullString
-		if err := rows.Scan(&l.ShortCode, &l.OriginalURL, &l.ClickCount, &l.UniqueClickCount, &l.Position, &l.IsFeatured, &l.IsActive, &tags, &rules); err != nil {
+		var expires sql.NullTime
+		if err := rows.Scan(&l.ShortCode, &l.OriginalURL, &l.ClickCount, &l.UniqueClickCount, &l.Position, &l.IsFeatured, &l.IsActive, &tags, &rules, &expires); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -99,46 +162,185 @@ func scanLinks(rows *sql.Rows) ([]Link, error) {
 			}
 		}
 		l.DeviceRules = parseRules(rules)
+		if expires.Valid {
+			u := expires.Time.UTC()
+			l.ExpiresAt = &u
+		}
+		l.Status = LinkStatus(l.ExpiresAt, now)
 		out = append(out, l)
 	}
 	rows.Close()
 	return out, nil
 }
 
+// ShardStore is the store interface over sharded databases: every operation
+// (create, get, increment) routes to the shard selected by hashing short_code
+// so that one database does not absorb the entire write load. Queries grow
+// more complex because of that routing; the mapping stays deterministic (a
+// short_code always lands on the same shard), but adding a third shard
+// requires rebalancing existing data - without it, rows remain on the wrong
+// shard. Consistent hashing would make shard growth cheaper but is
+// considerably more complex to implement.
 type ShardStore interface {
+	// GetURL reads the destination of a short code (public redirect path).
+	// Returns sql.ErrNoRows when the code is unknown; sharded mode adds
+	// sql.ErrConnDone when the code's shard is unavailable. A replica read
+	// may be briefly stale.
 	GetURL(shortCode string) (string, error)
-	CreateURL(shortCode, originalURL string, creatorID *int64, tagsJSON string) error
+	// CreateURL stores one link; expiresAt nil means no expiry (always UTC -
+	// the caller has already validated and converted it, see doShorten).
+	CreateURL(shortCode, originalURL string, creatorID *int64, tagsJSON string, expiresAt *time.Time) error
+	// CreateURLsBatch inserts a batch in ONE transaction (bulk import of
+	// 10-100 URLs). Unique conflicts (short_code already taken) are skipped
+	// per row through ON CONFLICT DO NOTHING - not by rolling back the whole
+	// batch - and reported as an empty code at the same index, so the handler
+	// can surface a per-row error. Result order matches items order.
+	CreateURLsBatch(creatorID *int64, items []BulkURL) ([]string, error)
+	// IncrementClickCount bumps urls.click_count by one (legacy counter
+	// path). An unknown code is not an error (0-row UPDATE); sharded mode
+	// returns sql.ErrConnDone when the shard is unavailable.
 	IncrementClickCount(shortCode string) error
+	// GetShard returns the *sql.DB serving shortCode (read DB on the single
+	// store, the hashed shard when sharded), or nil when unavailable.
 	GetShard(shortCode string) *sql.DB
+	// ListLinks returns every link of every account. Sharded mode skips
+	// missing shards; no links anywhere means an empty result, not an error.
 	ListLinks() ([]Link, error)
+	// CreateCreator inserts a creator and returns the new id. A duplicate
+	// username surfaces as the database's unique-violation error; sharded
+	// mode writes shard 0 (see its NOTE) and returns sql.ErrConnDone when
+	// that shard is unavailable.
 	CreateCreator(username, displayName, bio, passwordHash string) (int64, error)
+	// GetCreatorByUsername reads from the PRIMARY: login and the public
+	// profile page must see the freshest data (settings such as the theme must
+	// not be stale on the replica).
 	GetCreatorByUsername(username string) (Creator, error)
+	// GetCreatorByID reads one creator by id. Returns sql.ErrNoRows when the
+	// id is unknown (or not yet visible on a lagging replica); sharded mode
+	// adds sql.ErrConnDone when shard 0 is unavailable.
 	GetCreatorByID(id int64) (Creator, error)
-	// GetCreatorByIDPrimary: baca langsung dari PRIMARY — untuk data milik
-	// user sendiri (dashboard) supaya read-your-own-writes, lihat SingleStore
-	// implementasi di bawah.
+	// GetCreatorByIDPrimary reads straight from the PRIMARY - for the user's
+	// own data (dashboard) so reads immediately see their own writes; see the
+	// SingleStore implementation below.
 	GetCreatorByIDPrimary(id int64) (Creator, error)
+	// GetCreatorAuth reads from the PRIMARY only for account settings - it
+	// needs password_hash (to verify the password before changing email or
+	// password, or deleting the account) and email (shown as the current
+	// email). The hash is NEVER released to JSON; it is only used by
+	// auth.CheckPassword in the handler.
+	GetCreatorAuth(id int64) (Creator, error)
+	// UpdateCreatorEmail writes the new email to the PRIMARY. It returns
+	// ErrEmailTaken when another creator already uses it (UNIQUE partial index
+	// creators_email_key - enforced by the database, not a racy
+	// check-then-insert).
+	UpdateCreatorEmail(id int64, email string) error
+	// UpdateCreatorPassword writes the NEW password_hash (the caller has
+	// already hashed it with bcrypt).
+	UpdateCreatorPassword(id int64, passwordHash string) error
+	// DeleteCreatorAccount removes the account and all of its data in one
+	// PRIMARY transaction (click_events -> urls -> api_keys -> creators; the
+	// order matters: urls.creator_id has a foreign key without CASCADE).
+	DeleteCreatorAccount(id int64) error
+	// UpdateCreatorProfile updates the owner's display fields (username is
+	// immutable - it is the public URL). A missing id affects 0 rows and
+	// still returns nil; sharded mode errors only when shard 0 is
+	// unavailable.
 	UpdateCreatorProfile(id int64, displayName, bio, avatarURL, socialsJSON, theme string) error
+	// ListLinksByCreator reads from the PRIMARY and filters is_active (public
+	// profile: the owner's edits must be visible immediately, disabled links
+	// stay hidden).
 	ListLinksByCreator(creatorID int64) ([]Link, error)
-	// ListLinksByCreatorPrimary: baca daftar link langsung dari PRIMARY (paket
-	// read-your-own-writes yang sama dengan GetCreatorByIDPrimary).
+	// ListLinksByCreatorPrimary reads the link list straight from the PRIMARY
+	// (the same read-your-own-writes set as GetCreatorByIDPrimary).
 	ListLinksByCreatorPrimary(creatorID int64) ([]Link, error)
+	// ReorderLinks rewrites positions from order in one transaction.
+	// Returns sql.ErrNoRows when a code is unknown or not owned (404 in the
+	// handler); sharded mode has no cross-shard transaction (documented
+	// limitation) and adds sql.ErrConnDone for a missing shard.
 	ReorderLinks(creatorID int64, order []string) error
+	// LogClick writes one click atomically: event row plus counters, or
+	// neither. Failures roll back both sides; delivery stays at-most-once
+	// (see SingleStore.LogClick for the trade-off).
 	LogClick(e ClickEvent) error
+	// ClaimLinks attaches anonymous links to creatorID (IS NULL guard -
+	// see SingleStore.ClaimLinks). Returns the number actually claimed;
+	// unknown or already-owned codes are not errors, they only lower the
+	// count. Sharded mode returns sql.ErrConnDone for a missing shard.
 	ClaimLinks(creatorID int64, codes []string) (int64, error)
+	// ClicksByDay returns the zero-filled 30-day series for the dashboard
+	// chart. Query errors abort; a creator with no clicks gets all zeros,
+	// not an error.
 	ClicksByDay(creatorID int64) ([]DayCount, error)
+	// AnalyticsSummary computes the 4 dashboard summary numbers (active links,
+	// total clicks, uniques over 30 days, growth %) in the database, not the
+	// client.
+	AnalyticsSummary(creatorID int64) (AnalyticsSummary, error)
+	// DeviceBreakdown / ReferrerBreakdown (analytics depth): clicks per
+	// device_type / referrer_type bucket in the range [from, to) of one
+	// creator. The columns are already classified at write time (see
+	// ClickEvent), so the query only needs GROUP BY plus COALESCE for rows
+	// that predate classification.
+	DeviceBreakdown(creatorID int64, from, to time.Time) ([]BreakdownItem, error)
+	ReferrerBreakdown(creatorID int64, from, to time.Time) ([]BreakdownItem, error)
+	// ClicksDaily: clicks per day (YYYY-MM-DD) in the range - used by the
+	// 7/30/90-day chart range and the daily CSV export mode. It does not
+	// zero-fill (FillDays does that in the handler); only days with clicks are
+	// returned.
+	ClicksDaily(creatorID int64, from, to time.Time) (map[string]int64, error)
+	// LinkExportStats: all of the creator's links plus click/unique counts
+	// within the range. limit > 0 caps the rows (the CSV export requests
+	// limit+1 to detect truncation without reading the whole table).
+	LinkExportStats(creatorID int64, from, to time.Time, limit int) ([]LinkExportRow, error)
+	// ListClicks: the most recent raw clicks in the range, capped by limit -
+	// input for the clicks-mode CSV export (raw, one row per event).
+	ListClicks(creatorID int64, from, to time.Time, limit int) ([]ClickRow, error)
+	// AnalyticsFreshness: the analytics read source ("primary" / "replica")
+	// for the data_per field of the response - so clients know whether the
+	// numbers may be stale.
+	AnalyticsFreshness() (string, error)
+	// GetLink reads the full redirect row (device_rules, is_active,
+	// expires_at) for Smart Link routing and 410 answers. Returns
+	// sql.ErrNoRows when the code is unknown; sharded mode adds
+	// sql.ErrConnDone for a missing shard.
 	GetLink(shortCode string) (Link, error)
+	// UpdateLink owner-scoped full replace of device_rules + tags (no PATCH
+	// merge). Returns sql.ErrNoRows when unknown or not owned (404);
+	// sharded mode adds sql.ErrConnDone for a missing shard.
 	UpdateLink(creatorID int64, shortCode, deviceRulesJSON, tagsJSON string) error
+	// SetFeaturedLink keeps ONE featured link per creator (a radio).
+	// Featuring an unknown or not-owned code returns sql.ErrNoRows (404);
+	// featured=false is idempotent. Sharded mode has no cross-shard
+	// transaction (documented) and adds sql.ErrConnDone for a missing shard.
 	SetFeaturedLink(creatorID int64, shortCode string, featured bool) error
-	// SetLinkActive toggles is_active (Fase 13: disable link -> 410 di redirect,
-	// sembunyi dari publik; dashboard tetap melihatnya supaya bisa dihidupkan).
+	// SetLinkActive toggles is_active (Fase 13: disabling a link answers 410
+	// on redirect and hides it from the public page; the dashboard still lists
+	// it so it can be switched on again).
 	SetLinkActive(creatorID int64, shortCode string, active bool) error
-	// DeleteLink removes an OWNED link permanently + history click_events-nya.
+	// SetLinkExpiry writes or clears expires_at (migration 15) for a link
+	// owned by the creator; nil removes the expiry (the link stays active
+	// forever). RowsAffected 0 -> sql.ErrNoRows (not owned / unknown code ->
+	// 404 in the handler).
+	SetLinkExpiry(creatorID int64, shortCode string, expiresAt *time.Time) error
+	// DeleteLink removes an OWNED link permanently together with its
+	// click_events history.
 	DeleteLink(creatorID int64, shortCode string) error
+	// StoreAPIKey inserts a key hash and returns the new id (empty label is
+	// stored as NULL). The plaintext key is never stored. Sharded mode keeps
+	// keys on shard 0: sql.ErrConnDone when it is unavailable.
 	StoreAPIKey(creatorID int64, keyHash, label string) (int64, error)
+	// ListAPIKeys lists the creator's keys, newest first, without the hash.
+	// No keys means an empty result, not an error.
 	ListAPIKeys(creatorID int64) ([]APIKey, error)
+	// DeleteAPIKey removes one key scoped to the owner. Returns
+	// sql.ErrNoRows for an unknown or foreign id (404 without leaking ids).
 	DeleteAPIKey(creatorID int64, keyID int64) error
+	// GetAPIKeyByHash is the auth lookup for /api/v1. Returns sql.ErrNoRows
+	// for an unknown or revoked key (the middleware then rejects the
+	// request); the read may be served by a replica.
 	GetAPIKeyByHash(keyHash string) (APIKey, error)
+	// TouchAPIKeyLastUsed stamps last_used_at after successful auth.
+	// Best-effort: callers log the error and never fail the request - the
+	// request already succeeded by then.
 	TouchAPIKeyLastUsed(keyID int64) error
 }
 
@@ -155,10 +357,19 @@ type Creator struct {
 	Socials      sql.NullString
 	Theme        string
 	PasswordHash string
+	// Email is filled in through account settings (migration 14); "" means it
+	// was never set. Only GetCreatorAuth reads it - other SELECTs do not touch
+	// the column, so existing read paths are unchanged.
+	Email string
 }
 
+// ErrEmailTaken is returned by UpdateCreatorEmail when another creator already
+// uses the email (a UNIQUE violation is coerced into this sentinel so handlers
+// can map it to 409 without logging the raw driver error string).
+var ErrEmailTaken = errors.New("email already taken")
+
 // APIKey is one row of the api_keys table. key_hash is NEVER exposed to
-// handlers/JSON — only id/label/created_at/last_used_at leave the DB layer
+// handlers/JSON - only id/label/created_at/last_used_at leave the DB layer
 // (plaintext only ever exists in the response the moment a key is generated).
 // LastUsedAt is NULL until the key is first used (spec: nullable). No JSON
 // tags: sql.Null* doesn't marshal to the shape frontends expect, so the
@@ -171,19 +382,15 @@ type APIKey struct {
 	LastUsedAt sql.NullTime
 }
 
-// LEARN:
-//
-//	Kenapa: Link sosial disimpan sebagai SATU kolom JSONB [{platform,url}],
-//	bukan tabel socials terpisah. Data ini kecil (≤10 item), selalu dibaca
-//	bersama profil (tidak pernah di-query/join mandiri), dan tidak butuh
-//	constraint relasional — tabel terpisah hanya menambah JOIN + migration
-//	tanpa manfaat. JSONB (bukan TEXT) supaya tetap tervalidasi sebagai JSON
-//	dan bisa di-query/di-index kalau nanti dibutuhkan.
-//	Trade-off: Tidak ada FK/UNIQUE per platform di level DB; validasi bentuk
-//	(maks item, URL valid) pindah ke application layer. Query "semua kreator
-//	yang punya link Instagram" jadi mahal — tapi use case itu tidak ada.
-//	Alternatif: Tabel socials(creator_id, platform, url) — benar secara
-//	normalisasi, tapi over-engineering untuk list kecil yang read-atomic.
+// SocialLink is one entry of the profile's social links, stored as a single
+// JSONB array [{platform,url}] on the creator row instead of a socials table:
+// the data is small (<=10 items), always read together with the profile, and
+// never queried on its own, so a table would only add joins and migrations.
+// Trade-off: no per-platform FK/UNIQUE in the database - shape validation
+// (max items, valid URLs) moves to the application layer, and cross-creator
+// queries such as "all creators linking Instagram" become expensive, but no
+// such use case exists. JSONB rather than TEXT keeps the document validated
+// as JSON and, if it is ever needed, queryable and indexable.
 type SocialLink struct {
 	Platform string `json:"platform"`
 	URL      string `json:"url"`
@@ -191,6 +398,9 @@ type SocialLink struct {
 
 // CreateCreator inserts a creator on the PRIMARY (writes always go primary).
 // Returns the new id. Caller hashes the password first (see auth package).
+// A duplicate username comes back as the driver's unique-violation error
+// (HandleRegister coerces "duplicate key" to 409, same as
+// UpdateCreatorEmail).
 func (s *SingleStore) CreateCreator(username, displayName, bio, passwordHash string) (int64, error) {
 	var id int64
 	err := s.primary.QueryRow(
@@ -200,10 +410,17 @@ func (s *SingleStore) CreateCreator(username, displayName, bio, passwordHash str
 	return id, err
 }
 
-// GetCreatorByUsername reads via readDB (replica when enabled).
+// GetCreatorByUsername reads one creator from the PRIMARY (read-your-own-writes).
+// It serves login and the public page /api/u/{username}: credentials and the
+// user's settings (theme, bio, avatar) MUST be visible as soon as they are
+// saved. Reading through the manually synchronized replica (ARCHITECTURE.md
+// section 6) caused the "saved glass, /u still darkroom" bug - replica
+// synchronization only runs when it is triggered manually. The replication-lag
+// lesson still lives on the redirect path (GetURL -> readDB).
+// Returns sql.ErrNoRows when no creator has that username.
 func (s *SingleStore) GetCreatorByUsername(username string) (Creator, error) {
 	var c Creator
-	err := s.readDB().QueryRow(
+	err := s.primary.QueryRow(
 		"SELECT id, username, display_name, bio, avatar_url, socials, theme, password_hash FROM creators WHERE username = $1",
 		username,
 	).Scan(&c.ID, &c.Username, &c.DisplayName, &c.Bio, &c.AvatarURL, &c.Socials, &c.Theme, &c.PasswordHash)
@@ -211,6 +428,8 @@ func (s *SingleStore) GetCreatorByUsername(username string) (Creator, error) {
 }
 
 // GetCreatorByID reads one creator by id via readDB (replica when enabled).
+// Returns sql.ErrNoRows when the id is unknown or not yet visible on a
+// lagging replica.
 func (s *SingleStore) GetCreatorByID(id int64) (Creator, error) {
 	var c Creator
 	err := s.readDB().QueryRow(
@@ -222,6 +441,8 @@ func (s *SingleStore) GetCreatorByID(id int64) (Creator, error) {
 
 // UpdateCreatorProfile writes display_name, bio, avatar_url, socials, theme to the
 // PRIMARY by session owner id. Username is immutable (it is the public URL).
+// A missing id affects 0 rows and still returns nil: the session already
+// proved the account exists, so this is not an error path.
 func (s *SingleStore) UpdateCreatorProfile(id int64, displayName, bio, avatarURL, socialsJSON, theme string) error {
 	_, err := s.primary.Exec(
 		"UPDATE creators SET display_name = $1, bio = NULLIF($2,''), avatar_url = NULLIF($3,''), socials = $4, theme = $5 WHERE id = $6",
@@ -230,11 +451,14 @@ func (s *SingleStore) UpdateCreatorProfile(id int64, displayName, bio, avatarURL
 	return err
 }
 
-// GetCreatorByIDPrimary reads one creator by id from the PRIMARY. Hanya untuk
-// data milik user sendiri (GET /api/profile dkk): user harus langsung melihat
-// perubahannya sendiri tanpa menunggu sinkronisasi replica manual
-// (read-your-own-writes). Endpoint publik tetap lewat readDB (replica) supaya
-// replication lag tetap terbaca sebagai pelajaran di situ.
+// GetCreatorByIDPrimary reads one creator by id from the PRIMARY. Only for the
+// user's own data (GET /api/profile and similar): users must see their own
+// changes without waiting for manual replica synchronization
+// (read-your-own-writes). Public endpoints (/api/u) also read the PRIMARY
+// since the stale-theme bug was fixed - see GetCreatorByUsername; the only
+// remaining replica read path is the redirect (GetURL), where Fase 4
+// demonstrates replication lag.
+// Returns sql.ErrNoRows when the account no longer exists.
 func (s *SingleStore) GetCreatorByIDPrimary(id int64) (Creator, error) {
 	var c Creator
 	err := s.primary.QueryRow(
@@ -244,14 +468,88 @@ func (s *SingleStore) GetCreatorByIDPrimary(id int64) (Creator, error) {
 	return c, err
 }
 
-// ListLinksByCreator returns ACTIVE links of one creator in ONE query,
-// denormalized click_count + unique_click_count included — this is the
-// deliberate N+1 avoidance (PRD.md §2): one WHERE creator_id query instead
-// of 1 + N per-row count queries. Public path (GET /api/u/id): disabled
-// links (is_active=false) tidak ditampilkan ke publik, seperti bit.ly.
+// GetCreatorAuth reads password_hash + email from the PRIMARY (account
+// settings - read-your-own-writes, same as GetCreatorByIDPrimary).
+// Returns sql.ErrNoRows when the account no longer exists.
+func (s *SingleStore) GetCreatorAuth(id int64) (Creator, error) {
+	var c Creator
+	err := s.primary.QueryRow(
+		"SELECT id, username, display_name, bio, avatar_url, socials, theme, password_hash, COALESCE(email,'') FROM creators WHERE id = $1",
+		id,
+	).Scan(&c.ID, &c.Username, &c.DisplayName, &c.Bio, &c.AvatarURL, &c.Socials, &c.Theme, &c.PasswordHash, &c.Email)
+	return c, err
+}
+
+// UpdateCreatorEmail writes the new email to the PRIMARY. A unique violation
+// (23505, "duplicate key") is coerced to ErrEmailTaken - a driver-agnostic
+// string match, the same pattern as HandleRegister (both pgx and pq carry that
+// text).
+func (s *SingleStore) UpdateCreatorEmail(id int64, email string) error {
+	_, err := s.primary.Exec("UPDATE creators SET email = $1 WHERE id = $2", email, id)
+	if err != nil && strings.Contains(err.Error(), "duplicate key") {
+		return ErrEmailTaken
+	}
+	return err
+}
+
+// UpdateCreatorPassword writes the new password_hash to the PRIMARY (the
+// caller has already hashed it with auth.HashPassword).
+// Returns database errors as-is: password_hash carries no uniqueness
+// constraint, so unlike UpdateCreatorEmail there is no sentinel to translate.
+func (s *SingleStore) UpdateCreatorPassword(id int64, passwordHash string) error {
+	_, err := s.primary.Exec("UPDATE creators SET password_hash = $1 WHERE id = $2", passwordHash, id)
+	return err
+}
+
+// DeleteCreatorAccount removes the creator together with its data in one
+// transaction. click_events has no foreign key (migration 01) - it is deleted
+// first so no rows are orphaned once urls are gone; urls.creator_id is FK NO
+// ACTION and must be deleted before creators; api_keys already has ON DELETE
+// CASCADE but is deleted explicitly so the cleanup order stays readable (and
+// each account has few rows anyway).
+// Returns sql.ErrNoRows when the account did not exist; any earlier error
+// rolls the whole deletion back (defer tx.Rollback runs before the error
+// escapes).
+func (s *SingleStore) DeleteCreatorAccount(id int64) error {
+	tx, err := s.primary.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(
+		"DELETE FROM click_events WHERE short_code IN (SELECT short_code FROM urls WHERE creator_id = $1)",
+		id,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM urls WHERE creator_id = $1", id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM api_keys WHERE creator_id = $1", id); err != nil {
+		return err
+	}
+	res, err := tx.Exec("DELETE FROM creators WHERE id = $1", id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return sql.ErrNoRows
+	}
+	return tx.Commit()
+}
+
+// ListLinksByCreator returns the ACTIVE links of one creator in ONE query from
+// the PRIMARY (read-your-own-writes: the owner's edit/reorder/toggle appears on
+// /u/{username} immediately instead of lagging on the manually synchronized
+// replica), with denormalized click_count + unique_click_count included - this
+// is the deliberate N+1 avoidance (PRD.md section 2): one WHERE creator_id
+// query instead of 1 + N per-row count queries. Disabled links (is_active =
+// false) are not shown to the public, as on bit.ly.
+// A creator without active links returns an empty slice, not an error; query
+// and scan errors are returned unchanged.
 func (s *SingleStore) ListLinksByCreator(creatorID int64) ([]Link, error) {
-	rows, err := s.readDB().Query(
-		"SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}') FROM urls WHERE creator_id = $1 AND is_active = TRUE ORDER BY position ASC, id DESC",
+	rows, err := s.primary.Query(
+		"SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}'), expires_at FROM urls WHERE creator_id = $1 AND is_active = TRUE ORDER BY position ASC, id DESC",
 		creatorID,
 	)
 	if err != nil {
@@ -260,13 +558,14 @@ func (s *SingleStore) ListLinksByCreator(creatorID int64) ([]Link, error) {
 	return scanLinks(rows)
 }
 
-// ListLinksByCreatorPrimary returns ALL links (active AND disabled) of one
-// creator directly from the PRIMARY (read-your-own-writes untuk dashboard;
-// lihat GetCreatorByIDPrimary). Dashboard perlu melihat link disabled supaya
-// pemiliknya bisa menyalakan lagi.
+// ListLinksByCreatorPrimary returns ALL links (active and disabled) of one
+// creator directly from the PRIMARY (read-your-own-writes for the dashboard;
+// see GetCreatorByIDPrimary). The dashboard must list disabled links so their
+// owner can switch them back on.
+// Same error behavior as ListLinksByCreator: empty slice, not an error.
 func (s *SingleStore) ListLinksByCreatorPrimary(creatorID int64) ([]Link, error) {
 	rows, err := s.primary.Query(
-		"SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}') FROM urls WHERE creator_id = $1 ORDER BY position ASC, id DESC",
+		"SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}'), expires_at FROM urls WHERE creator_id = $1 ORDER BY position ASC, id DESC",
 		creatorID,
 	)
 	if err != nil {
@@ -303,7 +602,9 @@ func NewShardStore(numShards int) *shardStore {
 
 // CreateURL implements ShardStore - routes to the correct shard based on short_code hash.
 // creatorID nil = anonymous link (Fase 0-8 stay valid); non-nil = owned by creator.
-func (s *shardStore) CreateURL(shortCode, originalURL string, creatorID *int64, tagsJSON string) error {
+// Returns sql.ErrConnDone when the target shard is unavailable; a duplicate
+// short_code surfaces as the driver's unique-violation error.
+func (s *shardStore) CreateURL(shortCode, originalURL string, creatorID *int64, tagsJSON string, expiresAt *time.Time) error {
 	shardIdx := shortener.ShardKey(shortCode, s.numShards)
 	db, ok := s.shards[shardIdx]
 	if !ok {
@@ -312,8 +613,64 @@ func (s *shardStore) CreateURL(shortCode, originalURL string, creatorID *int64, 
 	if tagsJSON == "" {
 		tagsJSON = "[]"
 	}
-	_, err := db.Exec("INSERT INTO urls (short_code, original_url, creator_id, tags) VALUES ($1, $2, $3, $4)", shortCode, originalURL, nullableInt(creatorID), tagsJSON)
+	_, err := db.Exec("INSERT INTO urls (short_code, original_url, creator_id, tags, expires_at) VALUES ($1, $2, $3, $4, $5)", shortCode, originalURL, nullableInt(creatorID), tagsJSON, nullableTime(expiresAt))
 	return err
+}
+
+// CreateURLsBatch routes each item to its shard. Sharded mode has no
+// cross-shard transaction (documented the same way as ClaimLinks and
+// ReorderLinks: the official baseline is SingleStore); per-row conflicts are
+// still skipped with ON CONFLICT.
+// Returns sql.ErrConnDone when a shard is missing; a driver error aborts the
+// batch (rows already inserted stay - there is no cross-shard rollback); a
+// code that is already taken leaves "" at its index instead of failing.
+func (s *shardStore) CreateURLsBatch(creatorID *int64, items []BulkURL) ([]string, error) {
+	codes := make([]string, len(items))
+	for i, it := range items {
+		shardIdx := shortener.ShardKey(it.ShortCode, s.numShards)
+		db, ok := s.shards[shardIdx]
+		if !ok {
+			return nil, sql.ErrConnDone
+		}
+		tagsJSON := it.TagsJSON
+		if tagsJSON == "" {
+			tagsJSON = "[]"
+		}
+		res, err := db.Exec(
+			"INSERT INTO urls (short_code, original_url, creator_id, tags, expires_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (short_code) DO NOTHING",
+			it.ShortCode, it.OriginalURL, nullableInt(creatorID), tagsJSON, nullableTime(it.ExpiresAt),
+		)
+		if err != nil {
+			return nil, err
+		}
+		if n, _ := res.RowsAffected(); n == 1 {
+			codes[i] = it.ShortCode
+		}
+	}
+	return codes, nil
+}
+
+// SetLinkExpiry routes to the short_code's shard (the WHERE creator_id scope
+// leaves rows not owned by the caller untouched; see SingleStore.SetLinkExpiry).
+// Returns sql.ErrConnDone when the shard is missing, sql.ErrNoRows when the
+// code is unknown or not owned.
+func (s *shardStore) SetLinkExpiry(creatorID int64, shortCode string, expiresAt *time.Time) error {
+	shardIdx := shortener.ShardKey(shortCode, s.numShards)
+	db, ok := s.shards[shardIdx]
+	if !ok {
+		return sql.ErrConnDone
+	}
+	res, err := db.Exec(
+		"UPDATE urls SET expires_at = $3 WHERE short_code = $1 AND creator_id = $2",
+		shortCode, creatorID, nullableTime(expiresAt),
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // NOTE (shard mode + Fase 9): the creators table has no sharding design, so all
@@ -324,7 +681,9 @@ func (s *shardStore) shardZero() (*sql.DB, bool) {
 	return db, ok
 }
 
-// CreateCreator inserts a creator on shard 0 (see NOTE above).
+// CreateCreator inserts a creator on shard 0 (see NOTE above). Returns
+// sql.ErrConnDone when shard 0 is unavailable; a duplicate username comes
+// back as the driver's unique-violation error.
 func (s *shardStore) CreateCreator(username, displayName, bio, passwordHash string) (int64, error) {
 	db, ok := s.shardZero()
 	if !ok {
@@ -338,7 +697,8 @@ func (s *shardStore) CreateCreator(username, displayName, bio, passwordHash stri
 	return id, err
 }
 
-// GetCreatorByUsername reads from shard 0 (see NOTE above).
+// GetCreatorByUsername reads from shard 0 (see NOTE above). Returns
+// sql.ErrNoRows when unknown, sql.ErrConnDone when shard 0 is unavailable.
 func (s *shardStore) GetCreatorByUsername(username string) (Creator, error) {
 	var c Creator
 	db, ok := s.shardZero()
@@ -353,6 +713,8 @@ func (s *shardStore) GetCreatorByUsername(username string) (Creator, error) {
 }
 
 // GetCreatorByID reads one creator by id from shard 0 (see NOTE above).
+// Returns sql.ErrNoRows when unknown, sql.ErrConnDone when shard 0 is
+// unavailable.
 func (s *shardStore) GetCreatorByID(id int64) (Creator, error) {
 	var c Creator
 	db, ok := s.shardZero()
@@ -366,7 +728,9 @@ func (s *shardStore) GetCreatorByID(id int64) (Creator, error) {
 	return c, err
 }
 
-// UpdateCreatorProfile writes to shard 0 (see NOTE above).
+// UpdateCreatorProfile writes to shard 0 (see NOTE above). Returns
+// sql.ErrConnDone when shard 0 is unavailable; a missing id affects 0 rows
+// and still returns nil (same as SingleStore.UpdateCreatorProfile).
 func (s *shardStore) UpdateCreatorProfile(id int64, displayName, bio, avatarURL, socialsJSON, theme string) error {
 	db, ok := s.shardZero()
 	if !ok {
@@ -379,17 +743,101 @@ func (s *shardStore) UpdateCreatorProfile(id int64, displayName, bio, avatarURL,
 	return err
 }
 
-// GetCreatorByIDPrimary reads from shard 0 — mode sharded tidak punya
-// primary/replica terpisah, jadi hasilnya identik dengan GetCreatorByID.
+// GetCreatorByIDPrimary reads from shard 0 - sharded mode has no separate
+// primary/replica, so the result is identical to GetCreatorByID, including
+// its error contract (sql.ErrNoRows / sql.ErrConnDone).
 func (s *shardStore) GetCreatorByIDPrimary(id int64) (Creator, error) {
 	return s.GetCreatorByID(id)
 }
 
+// GetCreatorAuth reads password_hash + email from shard 0 (see NOTE above).
+// Returns sql.ErrNoRows when the account is gone, sql.ErrConnDone when
+// shard 0 is unavailable.
+func (s *shardStore) GetCreatorAuth(id int64) (Creator, error) {
+	var c Creator
+	db, ok := s.shardZero()
+	if !ok {
+		return c, sql.ErrConnDone
+	}
+	err := db.QueryRow(
+		"SELECT id, username, display_name, bio, avatar_url, socials, theme, password_hash, COALESCE(email,'') FROM creators WHERE id = $1",
+		id,
+	).Scan(&c.ID, &c.Username, &c.DisplayName, &c.Bio, &c.AvatarURL, &c.Socials, &c.Theme, &c.PasswordHash, &c.Email)
+	return c, err
+}
+
+// UpdateCreatorEmail writes to shard 0 (see NOTE above). Unique violations
+// are coerced to ErrEmailTaken, same as SingleStore.UpdateCreatorEmail.
+func (s *shardStore) UpdateCreatorEmail(id int64, email string) error {
+	db, ok := s.shardZero()
+	if !ok {
+		return sql.ErrConnDone
+	}
+	_, err := db.Exec("UPDATE creators SET email = $1 WHERE id = $2", email, id)
+	if err != nil && strings.Contains(err.Error(), "duplicate key") {
+		return ErrEmailTaken
+	}
+	return err
+}
+
+// UpdateCreatorPassword writes to shard 0 (see NOTE above). Returns
+// sql.ErrConnDone when shard 0 is unavailable, otherwise the driver error
+// as-is (no uniqueness constraint to translate).
+func (s *shardStore) UpdateCreatorPassword(id int64, passwordHash string) error {
+	db, ok := s.shardZero()
+	if !ok {
+		return sql.ErrConnDone
+	}
+	_, err := db.Exec("UPDATE creators SET password_hash = $1 WHERE id = $2", passwordHash, id)
+	return err
+}
+
+// DeleteCreatorAccount: all creator data lives on shard 0 (creators are never
+// sharded - see the NOTE at shardZero), so a single transaction on shard 0
+// suffices; only urls are spread across shards and every one of them is
+// deleted too (same order as SingleStore.DeleteCreatorAccount).
+// Returns sql.ErrConnDone when shard 0 is unavailable, sql.ErrNoRows when
+// the account did not exist; any earlier error rolls the transaction back.
+func (s *shardStore) DeleteCreatorAccount(id int64) error {
+	db, ok := s.shardZero()
+	if !ok {
+		return sql.ErrConnDone
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(
+		"DELETE FROM click_events WHERE short_code IN (SELECT short_code FROM urls WHERE creator_id = $1)",
+		id,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM urls WHERE creator_id = $1", id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM api_keys WHERE creator_id = $1", id); err != nil {
+		return err
+	}
+	res, err := tx.Exec("DELETE FROM creators WHERE id = $1", id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return sql.ErrNoRows
+	}
+	return tx.Commit()
+}
+
 // ListLinksByCreator queries every shard with the same single-query shape
-// (denormalized click_count, no N+1) and merges. Khusus mode publik
-// (is_active = TRUE): tile link yang di-disable tidak terlihat oleh pengunjung.
-// Cross-shard ordering is by shard index, not global time — acceptable for
+// (denormalized click_count, no N+1) and merges. Only the public scope is
+// used (is_active = TRUE): disabled link tiles stay invisible to visitors.
+// Cross-shard ordering is by shard index, not global time - acceptable at
 // learning scale.
+// A missing shard is skipped (its links simply do not appear) instead of
+// failing the whole read; query or scan errors abort the merge and are
+// returned as-is. No links anywhere = empty slice, not an error.
 func (s *shardStore) ListLinksByCreator(creatorID int64) ([]Link, error) {
 	var out []Link
 	for i := 0; i < s.numShards; i++ {
@@ -398,7 +846,7 @@ func (s *shardStore) ListLinksByCreator(creatorID int64) ([]Link, error) {
 			continue
 		}
 		rows, err := db.Query(
-			"SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}') FROM urls WHERE creator_id = $1 AND is_active = TRUE ORDER BY position ASC, id DESC",
+			"SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}'), expires_at FROM urls WHERE creator_id = $1 AND is_active = TRUE ORDER BY position ASC, id DESC",
 			creatorID,
 		)
 		if err != nil {
@@ -413,15 +861,18 @@ func (s *shardStore) ListLinksByCreator(creatorID int64) ([]Link, error) {
 	return out, nil
 }
 
-// ListLinksByCreatorPrimary — mode sharded idem ListLinksByCreator (tidak ada
-// replica terpisah di shardStore).
+// ListLinksByCreatorPrimary - sharded mode is the same as ListLinksByCreator
+// (shardStore has no separate replica), including its error contract.
 func (s *shardStore) ListLinksByCreatorPrimary(creatorID int64) ([]Link, error) {
 	return s.ListLinksByCreator(creatorID)
 }
 
 // ReorderLinks sets position per short_code in caller order. No cross-shard
 // transaction exists (shards are separate connections), so each shard updates
-// independently — documented limitation; Fase 9 runs on SingleStore anyway.
+// independently - documented limitation; Fase 9 runs on SingleStore anyway.
+// Returns sql.ErrConnDone when a target shard is missing, sql.ErrNoRows
+// when a code is unknown or not owned by creatorID (404 in the handler);
+// an empty order is a successful no-op.
 func (s *shardStore) ReorderLinks(creatorID int64, order []string) error {
 	for pos, code := range order {
 		shardIdx := shortener.ShardKey(code, s.numShards)
@@ -440,10 +891,13 @@ func (s *shardStore) ReorderLinks(creatorID int64, order []string) error {
 	return nil
 }
 
-// LogClick routes the event write to the short_code's shard (log + counters
-// in one transaction, same semantics as SingleStore — see LEARN there).
-// Unique clicks (Fase 13): saat IsUnique, kedua counter naik (total + unik);
-// repeat visits hanya menaikkan click_count.
+// LogClick routes the event write to the short_code's shard (log and counters
+// in one transaction, same semantics as SingleStore - see that
+// implementation). Unique clicks (Fase 13): when IsUnique both counters rise
+// (total and unique); repeat visits only increase click_count.
+// Returns sql.ErrConnDone when the short_code's shard is missing; any error
+// inside the transaction rolls back the event row and both counters together
+// (defer tx.Rollback).
 func (s *shardStore) LogClick(e ClickEvent) error {
 	shardIdx := shortener.ShardKey(e.ShortCode, s.numShards)
 	db, ok := s.shards[shardIdx]
@@ -456,8 +910,9 @@ func (s *shardStore) LogClick(e ClickEvent) error {
 	}
 	defer tx.Rollback()
 	if _, err := tx.Exec(
-		"INSERT INTO click_events (short_code, referrer, referrer_domain, is_unique, clicked_at) VALUES ($1, NULLIF($2,''), NULLIF($3,''), $4, $5)",
+		"INSERT INTO click_events (short_code, referrer, referrer_domain, is_unique, clicked_at, user_agent, device_type, referrer_type) VALUES ($1, NULLIF($2,''), NULLIF($3,''), $4, $5, NULLIF($6,''), NULLIF($7,''), NULLIF($8,''))",
 		e.ShortCode, e.Referrer, e.ReferrerDomain, e.IsUnique, clickTime(e.ClickedAt),
+		e.UserAgent, e.DeviceType, e.ReferrerType,
 	); err != nil {
 		return err
 	}
@@ -487,7 +942,9 @@ func clickTime(t time.Time) time.Time {
 }
 
 // ClicksByDay merges per-day counts from all shards, then zero-fills the
-// 30-day window (same helper as SingleStore — one fill logic everywhere).
+// 30-day window (same helper as SingleStore - one fill logic everywhere).
+// Missing shards are skipped (their clicks drop out of the merge instead of
+// failing the page); query/scan errors are returned as-is.
 func (s *shardStore) ClicksByDay(creatorID int64) ([]DayCount, error) {
 	merged := make(map[string]int64)
 	for i := 0; i < s.numShards; i++ {
@@ -519,8 +976,254 @@ func (s *shardStore) ClicksByDay(creatorID int64) ([]DayCount, error) {
 	return FillLast30Days(merged, time.Now()), nil
 }
 
+// AnalyticsSummary merges 4 dashboard stats across shards (same SUM pattern
+// as ClicksByDay's multi-shard merge - one row per shard, add into totals).
+// A shard query error aborts with the zero-value summary; missing shards are
+// skipped, so a down shard silently lowers the numbers (same trade-off as
+// the other merged reads).
+func (s *shardStore) AnalyticsSummary(creatorID int64) (AnalyticsSummary, error) {
+	var out AnalyticsSummary
+	var last30, prev30 int64
+	for i := 0; i < s.numShards; i++ {
+		db, ok := s.shards[i]
+		if !ok {
+			continue
+		}
+		var links, clicks, unique int64
+		if err := db.QueryRow(
+			`SELECT COUNT(*) FILTER (WHERE is_active), COALESCE(SUM(click_count), 0)
+			 FROM urls WHERE creator_id = $1`,
+			creatorID,
+		).Scan(&links, &clicks); err != nil {
+			return AnalyticsSummary{}, err
+		}
+		out.TotalLinks += links
+		out.TotalClicks += clicks
+
+		var shLast, shPrev int64
+		if err := db.QueryRow(
+			`SELECT
+				COUNT(*) FILTER (WHERE ce.is_unique AND ce.clicked_at >= CURRENT_DATE - INTERVAL '29 days'),
+				COUNT(*) FILTER (WHERE ce.clicked_at >= CURRENT_DATE - INTERVAL '29 days'),
+				COUNT(*) FILTER (WHERE ce.clicked_at >= CURRENT_DATE - INTERVAL '59 days'
+					AND ce.clicked_at < CURRENT_DATE - INTERVAL '29 days')
+			 FROM click_events ce
+			 JOIN urls u ON u.short_code = ce.short_code
+			 WHERE u.creator_id = $1`,
+			creatorID,
+		).Scan(&unique, &shLast, &shPrev); err != nil {
+			return AnalyticsSummary{}, err
+		}
+		out.UniqueClicks30d += unique
+		last30 += shLast
+		prev30 += shPrev
+	}
+	out.GrowthPct = growthPct(last30, prev30)
+	return out, nil
+}
+
+// sortBreakdown orders analytics buckets by descending count, then ascending
+// label (deterministic order, so "unknown" does not jump between refreshes).
+// Used by the cross-shard merge; the SingleStore path is already ordered by SQL.
+func sortBreakdown(items []BreakdownItem) {
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Count != items[j].Count {
+			return items[i].Count > items[j].Count
+		}
+		return items[i].Key < items[j].Key
+	})
+}
+
+// DeviceBreakdown implements ShardStore by running one grouped query per shard
+// and merging the buckets in Go (a single query cannot span shards; counts are
+// summed, not picked - the same merge pattern as ClicksByDay/AnalyticsSummary).
+// Missing shards are skipped; query/scan errors abort with a nil slice.
+func (s *shardStore) DeviceBreakdown(creatorID int64, from, to time.Time) ([]BreakdownItem, error) {
+	return s.breakdownAcrossShards(creatorID, from, to, "device")
+}
+
+// ReferrerBreakdown implements ShardStore for the referrer dimension: the
+// merge works exactly like DeviceBreakdown (breakdownAcrossShards with kind
+// "referrer"), including its error contract.
+func (s *shardStore) ReferrerBreakdown(creatorID int64, from, to time.Time) ([]BreakdownItem, error) {
+	return s.breakdownAcrossShards(creatorID, from, to, "referrer")
+}
+
+func (s *shardStore) breakdownAcrossShards(creatorID int64, from, to time.Time, kind string) ([]BreakdownItem, error) {
+	column, nullBucket := "ce.device_type", "unknown"
+	if kind == "referrer" {
+		column, nullBucket = "ce.referrer_type", "other"
+	}
+	query := `SELECT COALESCE(NULLIF(` + column + `, ''), $4) AS bucket, COUNT(*) AS n
+		 FROM click_events ce JOIN urls u ON u.short_code = ce.short_code
+		 WHERE u.creator_id = $1 AND ce.clicked_at >= $2 AND ce.clicked_at < $3
+		 GROUP BY 1`
+	merged := map[string]int64{}
+	for i := 0; i < s.numShards; i++ {
+		shard, ok := s.shards[i]
+		if !ok {
+			continue
+		}
+		rows, err := shard.Query(query, creatorID, from, to, nullBucket)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var key string
+			var n int64
+			if err := rows.Scan(&key, &n); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			merged[key] += n
+		}
+		rows.Close()
+	}
+	out := make([]BreakdownItem, 0, len(merged))
+	for k, n := range merged {
+		out = append(out, BreakdownItem{Key: k, Count: n})
+	}
+	sortBreakdown(out)
+	return out, nil
+}
+
+// ClicksDaily merges per-day counts from every shard (values are summed, not
+// picked) - like ClicksByDay but for an arbitrary range.
+// Missing shards are skipped; query/scan errors abort with a nil map. No
+// clicks in range means an empty map (no zero-fill here, see FillDays).
+func (s *shardStore) ClicksDaily(creatorID int64, from, to time.Time) (map[string]int64, error) {
+	merged := make(map[string]int64)
+	for i := 0; i < s.numShards; i++ {
+		shard, ok := s.shards[i]
+		if !ok {
+			continue
+		}
+		rows, err := shard.Query(
+			`SELECT TO_CHAR(ce.clicked_at, 'YYYY-MM-DD') AS day, COUNT(*) AS n
+			 FROM click_events ce JOIN urls u ON u.short_code = ce.short_code
+			 WHERE u.creator_id = $1 AND ce.clicked_at >= $2 AND ce.clicked_at < $3
+			 GROUP BY day`,
+			creatorID, from, to,
+		)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var day string
+			var n int64
+			if err := rows.Scan(&day, &n); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			merged[day] += n
+		}
+		rows.Close()
+	}
+	return merged, nil
+}
+
+// LinkExportStats merges rows across shards per short_code (a code lives in
+// exactly 1 shard, so merging is effectively concatenation; the limit is
+// applied after merging so the truncation stays deterministic).
+// Missing shards are skipped; query/scan errors abort with a nil slice; no
+// matching links means an empty slice (the handler then reports zero rows).
+func (s *shardStore) LinkExportStats(creatorID int64, from, to time.Time, limit int) ([]LinkExportRow, error) {
+	var out []LinkExportRow
+	for i := 0; i < s.numShards; i++ {
+		shard, ok := s.shards[i]
+		if !ok {
+			continue
+		}
+		query := `SELECT u.short_code, u.original_url, COALESCE(u.tags,'[]'),
+		       COUNT(ce.id) AS clicks, COUNT(ce.id) FILTER (WHERE ce.is_unique) AS uniques
+			 FROM urls u
+			 LEFT JOIN click_events ce ON ce.short_code = u.short_code
+			    AND ce.clicked_at >= $2 AND ce.clicked_at < $3
+			 WHERE u.creator_id = $1
+			 GROUP BY u.id`
+		rows, err := shard.Query(query, creatorID, from, to)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var r LinkExportRow
+			var tags sql.NullString
+			if err := rows.Scan(&r.ShortCode, &r.OriginalURL, &tags, &r.Clicks, &r.UniqueClicks); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			r.Tags = parseTags(tags)
+			out = append(out, r)
+		}
+		rows.Close()
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Clicks != out[j].Clicks {
+			return out[i].Clicks > out[j].Clicks
+		}
+		return out[i].ShortCode < out[j].ShortCode
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// ListClicks merges raw clicks across shards, sorts them descending by time,
+// then trims to the limit (same logic as SingleStore).
+// Missing shards are skipped; query/scan errors abort with a nil slice; no
+// clicks in range means an empty result, not an error.
+func (s *shardStore) ListClicks(creatorID int64, from, to time.Time, limit int) ([]ClickRow, error) {
+	var out []ClickRow
+	for i := 0; i < s.numShards; i++ {
+		shard, ok := s.shards[i]
+		if !ok {
+			continue
+		}
+		rows, err := shard.Query(
+			`SELECT ce.clicked_at, ce.short_code,
+		       COALESCE(NULLIF(ce.device_type,''), 'unknown'),
+		       COALESCE(NULLIF(ce.referrer_type,''), 'other'),
+		       COALESCE(ce.referrer_domain, ''), ce.is_unique
+			 FROM click_events ce JOIN urls u ON u.short_code = ce.short_code
+			 WHERE u.creator_id = $1 AND ce.clicked_at >= $2 AND ce.clicked_at < $3`,
+			creatorID, from, to,
+		)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var c ClickRow
+			if err := rows.Scan(&c.ClickedAt, &c.ShortCode, &c.DeviceType, &c.ReferrerType, &c.ReferrerDomain, &c.IsUnique); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out = append(out, c)
+		}
+		rows.Close()
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].ClickedAt.Equal(out[j].ClickedAt) {
+			return out[i].ClickedAt.After(out[j].ClickedAt)
+		}
+		return out[i].ShortCode < out[j].ShortCode
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// AnalyticsFreshness: every shard IS the PRIMARY - there is no replication
+// path to report (see SingleStore.analyticsRead for the dual-DB version).
+// It never returns an error.
+func (s *shardStore) AnalyticsFreshness() (string, error) { return "primary", nil }
+
 // ClaimLinks routes each code to its shard (same IS NULL guard per row;
-// no cross-shard transaction — documented limitation, see ReorderLinks).
+// no cross-shard transaction - documented limitation, see ReorderLinks).
+// Returns sql.ErrConnDone when a target shard is missing (the count so far
+// is discarded); unknown or already-owned codes are simply not counted and
+// are never an error - the handler reports {"claimed": n}.
 func (s *shardStore) ClaimLinks(creatorID int64, codes []string) (int64, error) {
 	var claimed int64
 	for _, code := range codes {
@@ -541,6 +1244,9 @@ func (s *shardStore) ClaimLinks(creatorID int64, codes []string) (int64, error) 
 }
 
 // UpdateLink implements ShardStore - routes to the shard, owner-scoped.
+// Returns sql.ErrConnDone when the shard is missing, sql.ErrNoRows when the
+// code is unknown or not owned by creatorID (the handler maps that to 404).
+// Empty JSON inputs are normalized to "{}"/"[]" before writing.
 func (s *shardStore) UpdateLink(creatorID int64, shortCode, deviceRulesJSON, tagsJSON string) error {
 	shardIdx := shortener.ShardKey(shortCode, s.numShards)
 	db, ok := s.shards[shardIdx]
@@ -566,11 +1272,15 @@ func (s *shardStore) UpdateLink(creatorID int64, shortCode, deviceRulesJSON, tag
 	return nil
 }
 
-// SetFeaturedLink implements ShardStore. Semantik sama dengan SingleStore
-// (radio 1-per-creator), TAPI tidak ada transaksi lintas-shard (shards = koneksi
-// terpisah): "unfeature semua" diiterasi per-shard baru target di-set — bila
-// proses mati di tengah, mungkin tersisa 2 featured. Ini dokumentasi-limitation,
-// Fase 9 berjalan di SingleStore yang transaksional (lihat LEARN di SingleStore).
+// SetFeaturedLink implements ShardStore. The semantics match SingleStore (one
+// radio per creator), BUT there is no cross-shard transaction (shards are
+// separate connections): "unfeature all" iterates shard by shard before the
+// target is set - if the process dies in between, two links may remain
+// featured. Documented limitation; Fase 9 runs on the transactional
+// SingleStore (see its comment).
+// Returns sql.ErrConnDone when the target shard is missing; an error from
+// the "unfeature all" sweep aborts before the target link is set; featuring
+// a code that is unknown or not owned yields sql.ErrNoRows.
 func (s *shardStore) SetFeaturedLink(creatorID int64, shortCode string, featured bool) error {
 	if featured {
 		for i := 0; i < s.numShards; i++ {
@@ -603,11 +1313,11 @@ func (s *shardStore) SetFeaturedLink(creatorID int64, shortCode string, featured
 	return nil
 }
 
-// Connect to the link's shard (shared helper used by the four lifecycle
-// methods DeleteLink / SetLinkActive / UpdateLink / CreateURL). Shortens
-// the repetitive "compute shard, look up db, bail if missing" preamble.
-// Trade-off: hides WHERE the shard lives, tapi semua panggi di bawah memang
-// tidak peduli — mereka hanya butuh db yang benar untuk routing pendek.
+// shardFor returns the connection of the link's shard (shared helper of the
+// lifecycle methods DeleteLink / SetLinkActive / UpdateLink / CreateURL) and
+// removes the repetitive "compute shard, look up db, bail if missing"
+// preamble. Trade-off: it hides WHERE the shard lives, but every caller below
+// is indifferent - they only need the correct db for short routing.
 func (s *shardStore) shardFor(shortCode string) (*sql.DB, error) {
 	shardIdx := shortener.ShardKey(shortCode, s.numShards)
 	db, ok := s.shards[shardIdx]
@@ -618,10 +1328,13 @@ func (s *shardStore) shardFor(shortCode string) (*sql.DB, error) {
 }
 
 // DeleteLink implements ShardStore - permanent delete, owner-scoped. Mirrors
-// SingleStore.DeleteLink: owner-scoped WHERE + related-rows cleanup. Trade-off
-// (serial di sini): deletes happen sequentially across shards — if the process
-// dies mid-way some click_events might be orphaned. Acceptable: a hard-deleted
-// link is intentionally rare and the FK is ON DELETE CASCADE (migration 01).
+// SingleStore.DeleteLink: owner-scoped WHERE plus related-row cleanup.
+// Trade-off (serial here): deletes happen sequentially across shards - if the
+// process dies midway, some click_events might be orphaned. Acceptable: a hard
+// delete is deliberately rare and the FK is ON DELETE CASCADE (migration 01).
+// Returns sql.ErrConnDone when the shard is missing, sql.ErrNoRows when the
+// code is unknown or not owned (404 in the handler); a transaction error
+// rolls the delete back (defer tx.Rollback).
 func (s *shardStore) DeleteLink(creatorID int64, shortCode string) error {
 	db, err := s.shardFor(shortCode)
 	if err != nil {
@@ -646,9 +1359,11 @@ func (s *shardStore) DeleteLink(creatorID int64, shortCode string) error {
 }
 
 // SetLinkActive implements ShardStore - owner-scoped broadcast of is_active
-// (Fase 13 lifecycle). Trade-off: no transaction across shards — if the two
+// (Fase 13 lifecycle). Trade-off: no transaction across shards - if the two
 // rows fight feature state mid-write, both may briefly be active; scoped to
 // the single short_code so only one shard is touched per call.
+// Returns sql.ErrConnDone when the shard is missing, sql.ErrNoRows when the
+// code is unknown or not owned (404 in the handler).
 func (s *shardStore) SetLinkActive(creatorID int64, shortCode string, active bool) error {
 	db, err := s.shardFor(shortCode)
 	if err != nil {
@@ -667,9 +1382,13 @@ func (s *shardStore) SetLinkActive(creatorID int64, shortCode string, active boo
 	return nil
 }
 
-// API key rows live on shard 0 together with creators (see NOTE at shardZero):
-// keys are per-creator metadata, not per-URL data, so they follow the same
-// no-sharding simplification as Fase 9's creators table.
+// StoreAPIKey inserts an API key row for creatorID and returns the new key id
+// (an empty label is stored as NULL). API key rows live on shard 0 together
+// with creators (see NOTE at shardZero): keys are per-creator metadata, not
+// per-URL data, so they follow the same no-sharding simplification as Fase
+// 9's creators table.
+// Returns sql.ErrConnDone when shard 0 is unavailable; otherwise the driver
+// error from INSERT ... RETURNING as-is.
 func (s *shardStore) StoreAPIKey(creatorID int64, keyHash, label string) (int64, error) {
 	db, ok := s.shardZero()
 	if !ok {
@@ -683,6 +1402,12 @@ func (s *shardStore) StoreAPIKey(creatorID int64, keyHash, label string) (int64,
 	return id, err
 }
 
+// ListAPIKeys returns the creator's API keys, newest first, from shard 0
+// (see StoreAPIKey for why keys live there). The secret itself is never
+// stored: rows only carry the SHA-256 hash, label, and timestamps, and the
+// hash is not even selected here because the dashboard does not need it.
+// Returns sql.ErrConnDone when shard 0 is unavailable; query/scan errors are
+// returned as-is; a creator with no keys gets an empty result, not an error.
 func (s *shardStore) ListAPIKeys(creatorID int64) ([]APIKey, error) {
 	db, ok := s.shardZero()
 	if !ok {
@@ -707,6 +1432,10 @@ func (s *shardStore) ListAPIKeys(creatorID int64) ([]APIKey, error) {
 	return out, rows.Err()
 }
 
+// DeleteAPIKey removes the key with the given id, scoped to creatorID so one
+// account can never delete another account's key. Returns sql.ErrNoRows when
+// the key does not exist or is not owned by creatorID; the handler maps that
+// to 404 without revealing which of the two cases occurred.
 func (s *shardStore) DeleteAPIKey(creatorID int64, keyID int64) error {
 	db, ok := s.shardZero()
 	if !ok {
@@ -722,6 +1451,10 @@ func (s *shardStore) DeleteAPIKey(creatorID int64, keyID int64) error {
 	return nil
 }
 
+// GetAPIKeyByHash loads the API key whose stored SHA-256 hash equals keyHash;
+// the plaintext key is never stored, so this lookup is how the public API
+// identifies its caller. Returns sql.ErrNoRows when no key matches (unknown
+// or deleted key).
 func (s *shardStore) GetAPIKeyByHash(keyHash string) (APIKey, error) {
 	db, ok := s.shardZero()
 	if !ok {
@@ -735,6 +1468,10 @@ func (s *shardStore) GetAPIKeyByHash(keyHash string) (APIKey, error) {
 	return k, err
 }
 
+// TouchAPIKeyLastUsed stamps last_used_at after a successful public-API call
+// so the dashboard can show when each key was last used. It is best-effort:
+// callers log the error and continue, because the API response itself has
+// already succeeded by then (handlers_apikeys.go).
 func (s *shardStore) TouchAPIKeyLastUsed(keyID int64) error {
 	db, ok := s.shardZero()
 	if !ok {
@@ -752,7 +1489,20 @@ func nullableInt(v *int64) any {
 	return *v
 }
 
-// GetURL implements ShardStore - routes to the correct shard based on short_code hash
+// nullableTime converts *time.Time to driver value: nil -> NULL. The value is
+// passed through unchanged - the caller MUST already be in UTC (the TIMESTAMP
+// without time zone column stores whatever it receives; see the expires_at
+// note on Link).
+func nullableTime(v *time.Time) any {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+// GetURL implements ShardStore - routes to the correct shard based on short_code hash.
+// Returns sql.ErrConnDone when the shard is unavailable, sql.ErrNoRows when
+// the code is unknown.
 func (s *shardStore) GetURL(shortCode string) (string, error) {
 	shardIdx := shortener.ShardKey(shortCode, s.numShards)
 	db, ok := s.shards[shardIdx]
@@ -769,7 +1519,9 @@ func (s *shardStore) GetURL(shortCode string) (string, error) {
 
 // GetLink implements ShardStore - routes to the shard and returns the row
 // needed for Smart Link device routing (original_url + device_rules) plus
-// lifecycle state is_active (redirect → 410 when disabled, Fase 13).
+// lifecycle state is_active (redirect -> 410 when disabled, Fase 13).
+// Returns sql.ErrConnDone when the shard is unavailable, sql.ErrNoRows when
+// the code is unknown.
 func (s *shardStore) GetLink(shortCode string) (Link, error) {
 	shardIdx := shortener.ShardKey(shortCode, s.numShards)
 	db, ok := s.shards[shardIdx]
@@ -778,18 +1530,25 @@ func (s *shardStore) GetLink(shortCode string) (Link, error) {
 	}
 	var l Link
 	var rules sql.NullString
+	var expires sql.NullTime
 	err := db.QueryRow(
-		"SELECT short_code, original_url, COALESCE(device_rules,'{}'), is_active FROM urls WHERE short_code = $1",
+		"SELECT short_code, original_url, COALESCE(device_rules,'{}'), is_active, expires_at FROM urls WHERE short_code = $1",
 		shortCode,
-	).Scan(&l.ShortCode, &l.OriginalURL, &rules, &l.IsActive)
+	).Scan(&l.ShortCode, &l.OriginalURL, &rules, &l.IsActive, &expires)
 	if err != nil {
 		return Link{}, err
 	}
 	l.DeviceRules = parseRules(rules)
+	if expires.Valid {
+		u := expires.Time.UTC()
+		l.ExpiresAt = &u
+	}
 	return l, nil
 }
 
-// IncrementClickCount implements ShardStore - routes to the correct shard
+// IncrementClickCount implements ShardStore - routes to the correct shard.
+// Returns sql.ErrConnDone when the shard is unavailable; an unknown code is
+// still a success (0-row UPDATE, no error).
 func (s *shardStore) IncrementClickCount(shortCode string) error {
 	shardIdx := shortener.ShardKey(shortCode, s.numShards)
 	db, ok := s.shards[shardIdx]
@@ -811,6 +1570,8 @@ func (s *shardStore) GetShard(shortCode string) *sql.DB {
 }
 
 // ListLinks returns all links across shards (merged in shard index order).
+// Missing shards are skipped; query/scan errors abort with a nil slice; no
+// links anywhere means an empty result, not an error.
 func (s *shardStore) ListLinks() ([]Link, error) {
 	var out []Link
 	for i := 0; i < s.numShards; i++ {
@@ -818,7 +1579,7 @@ func (s *shardStore) ListLinks() ([]Link, error) {
 		if !ok {
 			continue
 		}
-		rows, err := db.Query("SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}') FROM urls ORDER BY id DESC")
+		rows, err := db.Query("SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}'), expires_at FROM urls ORDER BY id DESC")
 		if err != nil {
 			return nil, err
 		}
@@ -839,15 +1600,17 @@ func (s *shardStore) DB() *sql.DB {
 	return nil
 }
 
-// NewShardStoreFromDSNs creates a sharded store from explicit DSNs (one per shard).
-// DSNs come from env (SHARD_DSNS, comma-separated), never hardcoded hosts.
-// LEARN:
-//
-//	Kenapa: Supaya daftar shard bisa diubah tanpa ubah kode (tambah shard = ubah env +
-//	restart), dan tiap environment (lokal/compose) bisa pakai host berbeda.
-//	Trade-off: Format env comma-separated rapuh (spasi/typo bikin shard hilang);
-//	jumlah DSN menentukan numShards sehingga salah config = routing salah.
-//	Alternatif: Service discovery (Consul/etcd), tapi overkill untuk belajar lokal.
+// NewShardStoreFromDSNs creates a sharded store from explicit DSNs (one per
+// shard). DSNs come from env (SHARD_DSNS, comma-separated), never hardcoded
+// hosts, so the shard list can change without touching code (adding a shard =
+// edit the env and restart) and every environment (local/compose) can use its
+// own hosts. Trade-off: the comma-separated env format is fragile (a stray
+// space or typo silently drops a shard) and the DSN count defines numShards,
+// so a wrong config misroutes every write. Service discovery (Consul/etcd) was
+// considered and rejected as overkill for local learning.
+// Returns the driver's open error for a malformed DSN; connections are NOT
+// pinged here, so an unreachable shard only surfaces later as
+// sql.ErrConnDone on first use.
 func NewShardStoreFromDSNs(dsns []string) (*shardStore, error) {
 	ss := &shardStore{
 		numShards: len(dsns),
@@ -863,16 +1626,16 @@ func NewShardStoreFromDSNs(dsns []string) (*shardStore, error) {
 	return ss, nil
 }
 
-// LEARN:
-//
-//	Kenapa: Store 1-database untuk mode baseline (Fase 0): tanpa sharding, tanpa
-//	replica wajib. Tulis selalu ke primary; baca ke replica HANYA kalau replica
-//	DSN diisi dan reachable (read/write splitting ala Fase 4). Mengimplementasikan
-//	ShardStore supaya handler tidak perlu tahu backend apa yang dipakai.
-//	Trade-off: Kalau replica mati saat start, baca fallback ke primary + warning
-//	(availability diutamakan, konsistensi baca tetap dari primary). Ping saat start
-//	bikin API crash-loop kalau primary belum ready — ditangani via restart policy.
-//	Alternatif: Health-check + circuit breaker per query, tapi kompleks untuk baseline.
+// SingleStore is the one-database store for baseline mode (Fase 0): no
+// sharding, no mandatory replica. Writes always go to the primary; reads go to
+// the replica ONLY when a replica DSN is configured and reachable (Fase 4
+// read/write splitting). It implements ShardStore so handlers need not know
+// which backend is in use. Trade-off: if the replica is down at startup, reads
+// fall back to the primary with a warning (availability first; reads stay
+// consistent with the primary). The startup ping means the API crash-loops
+// while the primary is not ready - handled through the restart policy. A
+// per-query health check plus circuit breaker was rejected as too complex for
+// a baseline.
 type SingleStore struct {
 	primary    *sql.DB
 	replica    *sql.DB
@@ -881,6 +1644,10 @@ type SingleStore struct {
 
 // NewSingleStore opens the primary DB and, optionally, a read replica.
 // Empty replicaDSN = reads fall back to primary (pure Fase 0 baseline).
+// Returns the driver's open error for the primary or for a malformed replica
+// DSN (the primary is closed first when the replica open fails); an
+// unreachable replica is not an error - it logs a warning and reads fall back
+// to the primary. The primary is not pinged here.
 func NewSingleStore(primaryDSN, replicaDSN string) (*SingleStore, error) {
 	primary, err := sql.Open("pgx", primaryDSN)
 	if err != nil {
@@ -912,16 +1679,75 @@ func (s *SingleStore) readDB() *sql.DB {
 	return s.primary
 }
 
-// CreateURL writes to the primary.
-func (s *SingleStore) CreateURL(shortCode, originalURL string, creatorID *int64, tagsJSON string) error {
+// CreateURL writes to the primary. Returns the driver error as-is; a
+// duplicate short_code surfaces as a unique-constraint violation.
+func (s *SingleStore) CreateURL(shortCode, originalURL string, creatorID *int64, tagsJSON string, expiresAt *time.Time) error {
 	if tagsJSON == "" {
 		tagsJSON = "[]"
 	}
-	_, err := s.primary.Exec("INSERT INTO urls (short_code, original_url, creator_id, tags) VALUES ($1, $2, $3, $4)", shortCode, originalURL, nullableInt(creatorID), tagsJSON)
+	_, err := s.primary.Exec("INSERT INTO urls (short_code, original_url, creator_id, tags, expires_at) VALUES ($1, $2, $3, $4, $5)", shortCode, originalURL, nullableInt(creatorID), tagsJSON, nullableTime(expiresAt))
 	return err
 }
 
+// CreateURLsBatch runs a bulk import (10-100 URLs) in ONE PRIMARY transaction:
+// every row commits together. Unique short_code conflicts are skipped PER ROW
+// through ON CONFLICT DO NOTHING - the transaction never aborts (no savepoint
+// required), so one duplicate URL cannot cancel the other 99. The result
+// mirrors items order: the stored short code, or "" when conflicted (the
+// caller reports it as a per-row error).
+func (s *SingleStore) CreateURLsBatch(creatorID *int64, items []BulkURL) ([]string, error) {
+	codes := make([]string, len(items))
+	if len(items) == 0 {
+		return codes, nil
+	}
+	tx, err := s.primary.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	for i, it := range items {
+		tagsJSON := it.TagsJSON
+		if tagsJSON == "" {
+			tagsJSON = "[]"
+		}
+		res, err := tx.Exec(
+			"INSERT INTO urls (short_code, original_url, creator_id, tags, expires_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (short_code) DO NOTHING",
+			it.ShortCode, it.OriginalURL, nullableInt(creatorID), tagsJSON, nullableTime(it.ExpiresAt),
+		)
+		if err != nil {
+			return nil, err
+		}
+		if n, _ := res.RowsAffected(); n == 1 {
+			codes[i] = it.ShortCode
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return codes, nil
+}
+
+// SetLinkExpiry writes or clears expires_at on the PRIMARY (read-your-own-
+// writes: the expired / ends-in badge on the dashboard changes right after
+// saving). Scoped by WHERE creator_id - someone else's link yields
+// sql.ErrNoRows (404, not 403).
+func (s *SingleStore) SetLinkExpiry(creatorID int64, shortCode string, expiresAt *time.Time) error {
+	res, err := s.primary.Exec(
+		"UPDATE urls SET expires_at = $3 WHERE short_code = $1 AND creator_id = $2",
+		shortCode, creatorID, nullableTime(expiresAt),
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 // GetURL reads from the replica when enabled, otherwise the primary.
+// Returns sql.ErrNoRows when the code is unknown (404 in the redirect
+// handler).
 func (s *SingleStore) GetURL(shortCode string) (string, error) {
 	var url string
 	err := s.readDB().QueryRow("SELECT original_url FROM urls WHERE short_code = $1", shortCode).Scan(&url)
@@ -932,23 +1758,31 @@ func (s *SingleStore) GetURL(shortCode string) (string, error) {
 }
 
 // GetLink reads the full redirect row (original_url + device_rules +
-// is_active) — needed by the Smart Link redirect path to route by device and
-// to answer 410 for disabled links. Same read path as GetURL.
+// is_active) - needed by the Smart Link redirect path to route by device and
+// to answer 410 for disabled links. Same read path as GetURL, including its
+// error contract (sql.ErrNoRows when the code is unknown).
 func (s *SingleStore) GetLink(shortCode string) (Link, error) {
 	var l Link
 	var rules sql.NullString
+	var expires sql.NullTime
 	err := s.readDB().QueryRow(
-		"SELECT short_code, original_url, COALESCE(device_rules,'{}'), is_active FROM urls WHERE short_code = $1",
+		"SELECT short_code, original_url, COALESCE(device_rules,'{}'), is_active, expires_at FROM urls WHERE short_code = $1",
 		shortCode,
-	).Scan(&l.ShortCode, &l.OriginalURL, &rules, &l.IsActive)
+	).Scan(&l.ShortCode, &l.OriginalURL, &rules, &l.IsActive, &expires)
 	if err != nil {
 		return Link{}, err
 	}
 	l.DeviceRules = parseRules(rules)
+	if expires.Valid {
+		u := expires.Time.UTC()
+		l.ExpiresAt = &u
+	}
 	return l, nil
 }
 
-// IncrementClickCount writes to the primary.
+// IncrementClickCount writes to the primary. Never fails for an unknown code
+// (a 0-row UPDATE is still success); only driver/connection errors are
+// returned.
 func (s *SingleStore) IncrementClickCount(shortCode string) error {
 	_, err := s.primary.Exec("UPDATE urls SET click_count = click_count + 1 WHERE short_code = $1", shortCode)
 	return err
@@ -960,9 +1794,10 @@ func (s *SingleStore) GetShard(shortCode string) *sql.DB {
 }
 
 // ListLinks returns all links, read from the replica when enabled
-// (Fase 8 dashboard reads from the read replica).
+// (Fase 8 dashboard reads from the read replica). A query error returns
+// nil; no rows yields an empty slice, not an error.
 func (s *SingleStore) ListLinks() ([]Link, error) {
-	rows, err := s.readDB().Query("SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}') FROM urls ORDER BY id DESC")
+	rows, err := s.readDB().Query("SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}'), expires_at FROM urls ORDER BY id DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -974,20 +1809,21 @@ func (s *SingleStore) DB() *sql.DB {
 	return s.primary
 }
 
-// LEARN:
-//
-//	Kenapa klaim HARUS conditional write (WHERE creator_id IS NULL), bukan
-//	update buta: server tidak tahu link anonim mana dibuat browser mana (HTTP
-//	stateless, pre-login tidak ada identitas) — jadi daftar kandidat datang
-//	dari client (localStorage browser pembuatnya). Kalau server asal update
-//	tanpa syarat, SIAPA PUN yang login bisa merebut link milik orang lain
-//	hanya dengan menebak short-code. Syarat IS NULL adalah batas keamanannya:
-//	link ber-pemilik tidak tersentuh, klaim ganda aman (affected 0).
-//	Trade-off: Seluruh batch dalam 1 transaction (semua-atau-tidak-sama-sekali)
-//	supaya klaim parsial tidak membingungkan ("3 dari 5 masuk, mana yang mana?").
-//	Alternatif: Klaim otomatis semua link NULL ke user yang login (tanpa daftar
-//	client) — terlihat simpel tapi itu celah: pendaftar pertama menyapu bersih
-//	SEMUA link anonim siapa pun. Jangan pernah lakukan itu.
+// ClaimLinks attaches previously anonymous links to the logged-in creator. The
+// write MUST stay conditional (WHERE creator_id IS NULL) rather than a blind
+// update: the server cannot know which browser created which anonymous link
+// (stateless HTTP, no identity before login), so the candidate list comes from
+// the creating browser's localStorage. An unconditional update would let ANY
+// user take over someone else's link merely by guessing its short code; the IS
+// NULL condition is the security boundary - owned rows stay untouched and a
+// double claim is harmless (0 affected). The whole batch runs in one
+// transaction (all-or-nothing) so a partial claim cannot confuse the client
+// ("3 of 5 landed, which ones?"). Claiming every NULL link for whoever logs in
+// first would let the first registrant sweep up EVERYONE's anonymous links and
+// must never be implemented.
+// Returns the begin/exec/commit error as-is (any failure rolls the batch back
+// via defer tx.Rollback); unknown or already-owned codes never fail - they
+// only lower the returned count.
 func (s *SingleStore) ClaimLinks(creatorID int64, codes []string) (int64, error) {
 	tx, err := s.primary.Begin()
 	if err != nil {
@@ -1031,14 +1867,15 @@ func (s *SingleStore) UpdateLink(creatorID int64, shortCode, deviceRulesJSON, ta
 	return nil
 }
 
-// SetFeaturedLink makes `shortCode` the creator's single featured link
-// (radio, bukan checkbox): featured=true meng-unfeature SEMUA link akun itu
-// lalu menaikkan target — dua write dalam SATU transaksi supaya pengamat
-// tidak pernah melihat 0 ATAU 2 featured (at-atomik seperti ClaimLinks).
-// Diblokir scope WITHIN creator_id pada target: link orang lain/kode kosong
-// -> sql.ErrNoRows -> 404. featured=false idempotent (unfeature target;
-// affected 0 = sudah tidak featured = sukses, bukan error). shardStore
-// meniru semantik ini tanpa transaksi lintas-shard (lihat LEARN di sana).
+// SetFeaturedLink makes `shortCode` the creator's single featured link (a
+// radio, not a checkbox): featured=true unfeatures EVERY link of that account
+// first, then promotes the target - two writes in ONE transaction so an
+// observer never sees 0 or 2 featured links (atomic, like ClaimLinks). The
+// target statement is scoped WITHIN creator_id: someone else's link or an
+// empty code -> sql.ErrNoRows -> 404. featured=false is idempotent (unfeature
+// the target; affected 0 = already not featured = success, not an error).
+// shardStore imitates this semantics without a cross-shard transaction (see
+// its comment).
 func (s *SingleStore) SetFeaturedLink(creatorID int64, shortCode string, featured bool) error {
 	tx, err := s.primary.Begin()
 	if err != nil {
@@ -1066,11 +1903,13 @@ func (s *SingleStore) SetFeaturedLink(creatorID int64, shortCode string, feature
 	return tx.Commit()
 }
 
-// DeleteLink implements ShardStore on the single non-sharded store — same
+// DeleteLink implements ShardStore on the single non-sharded store - the same
 // owner-scoped hard-delete semantics as shardStore.DeleteLink, in ONE
-// transaction: click_events dulu (FK ke urls), lalu urls. Worker memakai
-// SingleStore sebagai ShardStore (cmd/worker), jadi lifecycle delete harus
-// jalan di sini juga.
+// transaction: click_events first (FK to urls), then urls. The worker uses
+// SingleStore as a ShardStore (cmd/worker), so the delete lifecycle has to
+// work here too.
+// Returns sql.ErrNoRows when the code is unknown or not owned (404 in the
+// handler); any earlier error rolls the transaction back (defer tx.Rollback).
 func (s *SingleStore) DeleteLink(creatorID int64, shortCode string) error {
 	tx, err := s.primary.Begin()
 	if err != nil {
@@ -1093,9 +1932,11 @@ func (s *SingleStore) DeleteLink(creatorID int64, shortCode string) error {
 	return tx.Commit()
 }
 
-// SetLinkActive implements ShardStore on the single store — owner-scoped
+// SetLinkActive implements ShardStore on the single store - owner-scoped
 // toggle of is_active (Fase 14 active/inactive lifecycle). Mirrors
-// shardStore.SetLinkActive; single store tidak butuh shard routing.
+// shardStore.SetLinkActive; the single store needs no shard routing.
+// Returns sql.ErrNoRows when the code is unknown or not owned (404 in the
+// handler); driver errors are returned as-is.
 func (s *SingleStore) SetLinkActive(creatorID int64, shortCode string, active bool) error {
 	res, err := s.primary.Exec(
 		"UPDATE urls SET is_active = $1 WHERE short_code = $2 AND creator_id = $3",
@@ -1110,16 +1951,18 @@ func (s *SingleStore) SetLinkActive(creatorID int64, shortCode string, active bo
 	return nil
 }
 
-// hash yang disimpan, key asli tidak pernah menyentuh database. Kalau
-// database bocor, attacker tidak langsung bisa pakai key tersebut; format
-// "jjk_" + 32 hex (128 bit) membuat brute-force SHA-256 mustahil secara
-// komputasi (beda dari password user yang butuh bcrypt/argon2 karena
-// entropy-nya rendah — key itu random penuh, jadi hash cepat cukup dan
-// harga kecepatan itu wajib karena hash dicek di SETIAP request).
-// Trade-off: SHA-256 bukan fungsi lambat (tidak seperti bcrypt), tapi itu
-// disengaja: key 128-bit random tidak pernah bisa di-brute-force lewat
-// offline hash, dan API key di-autentikasi per-request (bcrypt per-request
-// = +100ms latensi per panggilan).
+// StoreAPIKey keeps only the hash, so the real key never touches the
+// database: if the database leaks, the key cannot be used directly. The
+// "jjk_" + 32 hex (128 bit) format makes brute-forcing SHA-256 computationally
+// impossible (unlike user passwords, which need bcrypt/argon2 because their
+// entropy is low - an API key is fully random, so a fast hash suffices, and
+// that speed is mandatory because the hash is checked on EVERY request).
+// Trade-off: SHA-256 is deliberately not a slow function (unlike bcrypt) -
+// a random 128-bit key can never be brute-forced through an offline hash,
+// while API keys are authenticated per request (bcrypt per request = +100ms
+// latency per call).
+// Returns the driver error from INSERT ... RETURNING as-is (an empty label
+// is stored as NULL, so it never fails validation here).
 func (s *SingleStore) StoreAPIKey(creatorID int64, keyHash, label string) (int64, error) {
 	var id int64
 	err := s.primary.QueryRow(
@@ -1130,8 +1973,10 @@ func (s *SingleStore) StoreAPIKey(creatorID int64, keyHash, label string) (int64
 }
 
 // ListAPIKeys returns the caller's keys. Writes (creator_id scope) read from
-// primary — keys are low-volume and must be instantly consistent for the
+// primary - keys are low-volume and must be instantly consistent for the
 // list/delete flow, so replica staleness is not worth it here.
+// Query/scan errors are returned as-is; a creator with no keys gets an empty
+// result, not an error.
 func (s *SingleStore) ListAPIKeys(creatorID int64) ([]APIKey, error) {
 	rows, err := s.primary.Query(
 		"SELECT id, creator_id, label, created_at, last_used_at FROM api_keys WHERE creator_id = $1 ORDER BY created_at DESC",
@@ -1167,6 +2012,9 @@ func (s *SingleStore) DeleteAPIKey(creatorID int64, keyID int64) error {
 
 // GetAPIKeyByHash looks a hash up for the API-key auth middleware. Read path
 // (replica when enabled) because every /api/v1 request hits this.
+// Returns sql.ErrNoRows when no key matches (unknown, revoked, or served by
+// a lagging replica right after creation); the middleware then rejects the
+// request.
 func (s *SingleStore) GetAPIKeyByHash(keyHash string) (APIKey, error) {
 	var k APIKey
 	err := s.readDB().QueryRow(
@@ -1178,7 +2026,7 @@ func (s *SingleStore) GetAPIKeyByHash(keyHash string) (APIKey, error) {
 
 // TouchAPIKeyLastUsed stamps last_used_at on a key (run after successful API
 // auth). Fire-and-forget-friendly: error is logged by the caller, never
-// fails the request — the request already succeeded by then.
+// fails the request - the request already succeeded by then.
 func (s *SingleStore) TouchAPIKeyLastUsed(keyID int64) error {
 	_, err := s.primary.Exec("UPDATE api_keys SET last_used_at = NOW() WHERE id = $1", keyID)
 	return err
@@ -1190,19 +2038,40 @@ type DayCount struct {
 	Count int64  `json:"count"`
 }
 
-// LEARN:
-//
-//	Kenapa: Agregasi (GROUP BY hari) dikerjakan DI query DB, bukan dengan
-//	menarik semua baris click_events lalu dihitung di aplikasi. Ini prinsip
-//	yang sama dengan hindari N+1, versi "ringkasan": kalau yang dibutuhkan
-//	cuma 30 angka, jangan transfer ribuan row mentah lewat network lalu
-//	buang 99%nya di memori aplikasi. DB memang dirancang untuk agregat
-//	(index + GROUP BY), aplikasi tidak.
-//	Trade-off: Logika bisnis (bucket tanggal, zero-fill) terbelah: GROUP BY
-//	di SQL, zero-fill tanggal kosong di Go (lihat FillLast30Days) — karena
-//	SQL tanpa generate_series akan menghilangkan hari tanpa klik (chart
-//	bolong). Alternatif: generate_series di SQL (1 query penuh) atau tarik
-//	mentah + agregat di Go (boros bandwidth, ditolak).
+// AnalyticsSummary is the payload of GET /api/analytics/summary - the 4 stat
+// numbers of the Ringkasan card. GrowthPct compares the clicks of the last 30
+// days against the previous 30 (rounded, %); UniqueClicks30d is a COUNT of
+// click_events rows with is_unique inside the 30-day window (not the all-time
+// unique_click_count counter).
+type AnalyticsSummary struct {
+	TotalLinks      int64 `json:"total_links"`
+	TotalClicks     int64 `json:"total_clicks"`
+	UniqueClicks30d int64 `json:"unique_clicks_30d"`
+	GrowthPct       int   `json:"growth_pct"`
+}
+
+// growthPct computes (last-prev)/prev*100, rounded. When prev==0 there is no
+// baseline: 0 if last is also 0, 100 when there are clicks (growth from zero).
+func growthPct(last, prev int64) int {
+	if prev == 0 {
+		if last > 0 {
+			return 100
+		}
+		return 0
+	}
+	return int(math.Round(float64(last-prev) / float64(prev) * 100))
+}
+
+// dailyCounts aggregates per day inside the database instead of pulling every
+// click_events row into the application - the same principle as avoiding N+1,
+// in summary form: when only 30 numbers are needed, transferring thousands of
+// raw rows over the network only to discard 99% of them in process memory is
+// wasteful (databases are built for aggregation through index + GROUP BY,
+// applications are not). Trade-off: business logic is split - GROUP BY in SQL,
+// zero-filling of empty days in Go (see FillLast30Days) - because SQL without
+// generate_series would drop days without clicks and leave holes in the chart.
+// Alternatives: generate_series in SQL (one complete query), or fetching raw
+// rows and aggregating in Go (bandwidth-hungry, rejected).
 func (s *SingleStore) dailyCounts(creatorID int64) (map[string]int64, error) {
 	rows, err := s.readDB().Query(
 		`SELECT TO_CHAR(ce.clicked_at, 'YYYY-MM-DD') AS day, COUNT(*) AS count
@@ -1229,12 +2098,258 @@ func (s *SingleStore) dailyCounts(creatorID int64) (map[string]int64, error) {
 
 // ClicksByDay returns a complete 30-day window (today included) with zeros
 // for days without clicks, read from the replica when enabled.
+// dailyCounts errors are returned unchanged; no clicks at all means every
+// day is 0, not an error.
 func (s *SingleStore) ClicksByDay(creatorID int64) ([]DayCount, error) {
 	counts, err := s.dailyCounts(creatorID)
 	if err != nil {
 		return nil, err
 	}
 	return FillLast30Days(counts, time.Now()), nil
+}
+
+// AnalyticsSummary computes the 4 dashboard numbers in 2 aggregate queries
+// (COUNT/SUM FILTER plus a 60-day window JOIN) instead of loading every link
+// and event into the application. Trade-off: growth needs a 60-day window over
+// click_events (ClicksByDay covers only 30 days) - a heavier query than the
+// chart, though still O(days) through the (short_code, clicked_at) index;
+// prev==0 yields growth 0 or 100 (no baseline). A materialized view or a daily
+// precompute was rejected as overkill for an MVP.
+// A query error aborts with the zero-value summary; an account with no links
+// or no clicks yields zeros (growth 0 or 100 when there is no baseline).
+func (s *SingleStore) AnalyticsSummary(creatorID int64) (AnalyticsSummary, error) {
+	var out AnalyticsSummary
+	err := s.readDB().QueryRow(
+		`SELECT COUNT(*) FILTER (WHERE is_active), COALESCE(SUM(click_count), 0)
+		 FROM urls WHERE creator_id = $1`,
+		creatorID,
+	).Scan(&out.TotalLinks, &out.TotalClicks)
+	if err != nil {
+		return AnalyticsSummary{}, err
+	}
+
+	var last30, prev30 int64
+	err = s.readDB().QueryRow(
+		`SELECT
+			COUNT(*) FILTER (WHERE ce.is_unique AND ce.clicked_at >= CURRENT_DATE - INTERVAL '29 days'),
+			COUNT(*) FILTER (WHERE ce.clicked_at >= CURRENT_DATE - INTERVAL '29 days'),
+			COUNT(*) FILTER (WHERE ce.clicked_at >= CURRENT_DATE - INTERVAL '59 days'
+				AND ce.clicked_at < CURRENT_DATE - INTERVAL '29 days')
+		 FROM click_events ce
+		 JOIN urls u ON u.short_code = ce.short_code
+		 WHERE u.creator_id = $1`,
+		creatorID,
+	).Scan(&out.UniqueClicks30d, &last30, &prev30)
+	if err != nil {
+		return AnalyticsSummary{}, err
+	}
+	out.GrowthPct = growthPct(last30, prev30)
+	return out, nil
+}
+
+// analyticsRead picks the REPLICA only while its lag stays within reason
+// (< 1 hour), instead of blindly selecting the replica like the other read
+// paths. The dashboard shows cumulative numbers that nobody chases within
+// seconds (unlike read-your-own-writes on profile/links), so a few seconds of
+// staleness are unnoticeable - but a replica stuck for hours would make "the
+// last 30 days" look stale for no visible reason. The 1-hour threshold was
+// chosen because both queries run occasionally rather than per redirect, so
+// one extra query (pg_last_xact_replay_timestamp) costs nothing next to the
+// large GROUP BY that follows. Trade-off: baseline mode (no replica) always
+// stays PRIMARY - the data_per label follows that reality, not a hope. A
+// standby that has never received WAL returns NULL and is treated as PRIMARY
+// (fail-safe). Alternatives: always primary (honest but wasteful on a
+// read-heavy path) or always replica (fast but silently stale).
+func (s *SingleStore) analyticsRead() (*sql.DB, string) {
+	if !s.useReplica || s.replica == nil {
+		return s.primary, "primary"
+	}
+	var last sql.NullTime
+	if err := s.replica.QueryRow("SELECT pg_last_xact_replay_timestamp()").Scan(&last); err != nil || !last.Valid {
+		return s.primary, "primary"
+	}
+	if time.Since(last.Time) > time.Hour {
+		return s.primary, "primary"
+	}
+	return s.replica, "replica"
+}
+
+// AnalyticsFreshness implements ShardStore - it reports the analytics read
+// source for the data_per field of the dashboard response (see
+// analyticsRead). It never returns an error.
+func (s *SingleStore) AnalyticsFreshness() (string, error) {
+	_, dataPer := s.analyticsRead()
+	return dataPer, nil
+}
+
+// breakdownQuery is the single query used for BOTH breakdowns (device and
+// referrer); the column is selected through placeholder $4 so the two SQL
+// copies cannot drift apart. COALESCE covers rows that predate classification
+// (migration 16 backfills, but NULL still maps to a sensible bucket).
+func (s *SingleStore) breakdownQuery(creatorID int64, from, to time.Time, column, nullBucket string) ([]BreakdownItem, error) {
+	// Identifier allowlist (SQL-injection guard): a column name cannot be a
+	// bound parameter, so the two supported identifiers are hard-coded and
+	// every other value is rejected BEFORE the query is assembled. Callers
+	// pass literals today, but the signature accepts any string: the allowlist
+	// makes that safety a property of this function, not of its call sites.
+	switch column {
+	case "ce.device_type", "ce.referrer_type":
+	default:
+		return nil, fmt.Errorf("breakdownQuery: unsupported column %q", column)
+	}
+	// #nosec G202 -- `column` is restricted to the two literals above; it is
+	// concatenated only after the allowlist check, never bound from input.
+	query := `SELECT COALESCE(NULLIF(` + column + `, ''), $4) AS bucket, COUNT(*) AS n
+		 FROM click_events ce JOIN urls u ON u.short_code = ce.short_code
+		 WHERE u.creator_id = $1 AND ce.clicked_at >= $2 AND ce.clicked_at < $3
+		 GROUP BY 1 ORDER BY 2 DESC, 1 ASC`
+	db, _ := s.analyticsRead()
+	rows, err := db.Query(query, creatorID, from, to, nullBucket)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []BreakdownItem{}
+	for rows.Next() {
+		var it BreakdownItem
+		if err := rows.Scan(&it.Key, &it.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+// DeviceBreakdown implements ShardStore: one grouped query on the single
+// database (breakdownQuery maps the column and the null bucket).
+// Query/scan errors are returned as-is; no matching rows means an empty
+// slice (the chart renders nothing).
+func (s *SingleStore) DeviceBreakdown(creatorID int64, from, to time.Time) ([]BreakdownItem, error) {
+	return s.breakdownQuery(creatorID, from, to, "ce.device_type", "unknown")
+}
+
+// ReferrerBreakdown implements ShardStore for the referrer dimension: same
+// query shape as DeviceBreakdown, different column and null bucket, same
+// error contract (errors as-is, empty slice when nothing matches).
+func (s *SingleStore) ReferrerBreakdown(creatorID int64, from, to time.Time) ([]BreakdownItem, error) {
+	return s.breakdownQuery(creatorID, from, to, "ce.referrer_type", "other")
+}
+
+// ClicksDaily counts clicks per day in the range (no zero-fill - see
+// FillDays). Reads use the analytics path (fresh replica or primary).
+// Query/scan/rows errors are returned as-is; no clicks in range means an
+// empty map, not an error.
+func (s *SingleStore) ClicksDaily(creatorID int64, from, to time.Time) (map[string]int64, error) {
+	db, _ := s.analyticsRead()
+	rows, err := db.Query(
+		`SELECT TO_CHAR(ce.clicked_at, 'YYYY-MM-DD') AS day, COUNT(*) AS n
+		 FROM click_events ce JOIN urls u ON u.short_code = ce.short_code
+		 WHERE u.creator_id = $1 AND ce.clicked_at >= $2 AND ce.clicked_at < $3
+		 GROUP BY day`,
+		creatorID, from, to,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]int64)
+	for rows.Next() {
+		var day string
+		var n int64
+		if err := rows.Scan(&day, &n); err != nil {
+			return nil, err
+		}
+		out[day] = n
+	}
+	return out, rows.Err()
+}
+
+// parseTags splits the tags JSONB column (["a","b"]) into []string. Corrupt
+// or empty -> [] (fail soft, consistent with scanLinks).
+func parseTags(raw sql.NullString) []string {
+	if !raw.Valid || strings.TrimSpace(raw.String) == "" {
+		return []string{}
+	}
+	var parsed []string
+	if err := json.Unmarshal([]byte(raw.String), &parsed); err != nil || parsed == nil {
+		return []string{}
+	}
+	return parsed
+}
+
+// LinkExportStats returns every link of the creator together with its click
+// and unique counts INSIDE the range (LEFT JOIN: links without clicks still
+// appear, with 0 - an honest export for new links). limit > 0 trims the
+// result (the handler requests limit+1 to learn whether rows were left out).
+// Query/scan errors are returned as-is; a creator with no links (or none in
+// range) gets an empty slice, not an error.
+func (s *SingleStore) LinkExportStats(creatorID int64, from, to time.Time, limit int) ([]LinkExportRow, error) {
+	query := `SELECT u.short_code, u.original_url, COALESCE(u.tags,'[]'),
+	       COUNT(ce.id) AS clicks, COUNT(ce.id) FILTER (WHERE ce.is_unique) AS uniques
+		 FROM urls u
+		 LEFT JOIN click_events ce ON ce.short_code = u.short_code
+		    AND ce.clicked_at >= $2 AND ce.clicked_at < $3
+		 WHERE u.creator_id = $1
+		 GROUP BY u.id
+		 ORDER BY clicks DESC, u.short_code ASC`
+	args := []any{creatorID, from, to}
+	if limit > 0 {
+		query += " LIMIT $4"
+		args = append(args, limit)
+	}
+	db, _ := s.analyticsRead()
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []LinkExportRow{}
+	for rows.Next() {
+		var r LinkExportRow
+		var tags sql.NullString
+		if err := rows.Scan(&r.ShortCode, &r.OriginalURL, &tags, &r.Clicks, &r.UniqueClicks); err != nil {
+			return nil, err
+		}
+		r.Tags = parseTags(tags)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ListClicks returns the most recent raw clicks in the range (capped by
+// limit) - input for the clicks-mode CSV export. Ordering by descending time
+// puts the newest rows first, so truncation leaves the freshest data instead
+// of the oldest ever recorded.
+// Query/scan/rows errors are returned as-is; no clicks in range means an
+// empty slice, not an error.
+func (s *SingleStore) ListClicks(creatorID int64, from, to time.Time, limit int) ([]ClickRow, error) {
+	query := `SELECT ce.clicked_at, ce.short_code,
+	       COALESCE(NULLIF(ce.device_type,''), 'unknown'),
+	       COALESCE(NULLIF(ce.referrer_type,''), 'other'),
+	       COALESCE(ce.referrer_domain, ''), ce.is_unique
+		 FROM click_events ce JOIN urls u ON u.short_code = ce.short_code
+		 WHERE u.creator_id = $1 AND ce.clicked_at >= $2 AND ce.clicked_at < $3
+		 ORDER BY ce.clicked_at DESC, ce.id DESC`
+	args := []any{creatorID, from, to}
+	if limit > 0 {
+		query += " LIMIT $4"
+		args = append(args, limit)
+	}
+	db, _ := s.analyticsRead()
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ClickRow{}
+	for rows.Next() {
+		var c ClickRow
+		if err := rows.Scan(&c.ClickedAt, &c.ShortCode, &c.DeviceType, &c.ReferrerType, &c.ReferrerDomain, &c.IsUnique); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 // FillLast30Days merges per-day counts into a complete window ending today.
@@ -1248,23 +2363,35 @@ func FillLast30Days(counts map[string]int64, today time.Time) []DayCount {
 	return out
 }
 
-// LEARN:
-//
-//	Kenapa: Satu event klik ditulis sebagai 2 baris dalam 1 transaction:
-//	INSERT ke click_events (log append-only) + UPDATE counter click_count.
-//	Keduanya harus berhasil bersama — kalau counter naik tapi log hilang
-//	(atau sebaliknya), analytics dan counter berbohong satu sama lain.
-//	Trade-off: Transaction per event = 2 writes serial per klik (lebih berat
-//	dari fire-and-forget murni); batching N event per transaction akan lebih
-//	cepat tapi menunda visibilitas data. Delivery tetap at-most-once: gagal
-//	di tengah = event hilang + warning log (tidak ada retry/antrian mati).
-//	Alternatif: Pisah jadi 2 operasi tanpa transaction (risiko skew) atau
-//	hitung counter dari agregat click_events saat dibaca (mahal, anti-Fase 2).
-//
-// LogClick writes one click: INSERT click_events (with is_unique flag +
-// referrer_domain) + increment click_count (dan unique_click_count bila
-// is_unique) dalam 1 transaction — atomic seperti Fase 2 (dua angka ini
-// tidak boleh tidak sinkron).
+// FillDays is the ranged version of FillLast30Days: it fills EVERY day from
+// from to to (both UTC dates, to exclusive), including days without clicks.
+// Used by the 7/30/90-day chart range so the X axis has no gaps - the
+// zero-fill logic was moved here from SQL (generate_series), following the
+// trade-off documented in the dailyCounts comment. Dates are formatted with
+// the location of from/to themselves - callers pass time.UTC, so the buckets
+// match TO_CHAR(clicked_at) in the database (a TIMESTAMP without time zone
+// column always written in UTC by the application).
+func FillDays(counts map[string]int64, from, to time.Time) []DayCount {
+	out := make([]DayCount, 0, 32)
+	for d := from; d.Before(to); d = d.AddDate(0, 0, 1) {
+		key := d.Format("2006-01-02")
+		out = append(out, DayCount{Date: key, Count: counts[key]})
+	}
+	return out
+}
+
+// LogClick writes one click as 2 rows in ONE transaction: INSERT into
+// click_events (the append-only log, with the is_unique flag +
+// referrer_domain) plus UPDATE of the click_count counter (and
+// unique_click_count when is_unique). Both must succeed together - if the
+// counter rises while the log is missing (or vice versa), analytics and the
+// counter would contradict each other. Trade-off: one transaction per event
+// means 2 serial writes per click (heavier than pure fire-and-forget);
+// batching N events per transaction would be faster but delays data
+// visibility. Delivery stays at-most-once: a failure midway loses the event
+// with a warning log (no retry, no dead-letter queue). Alternatives rejected:
+// two operations without a transaction (skew risk), or deriving the counter
+// from click_events aggregates at read time (expensive, against Fase 2).
 func (s *SingleStore) LogClick(e ClickEvent) error {
 	tx, err := s.primary.Begin()
 	if err != nil {
@@ -1272,8 +2399,9 @@ func (s *SingleStore) LogClick(e ClickEvent) error {
 	}
 	defer tx.Rollback()
 	if _, err := tx.Exec(
-		"INSERT INTO click_events (short_code, referrer, referrer_domain, is_unique, clicked_at) VALUES ($1, NULLIF($2,''), NULLIF($3,''), $4, $5)",
+		"INSERT INTO click_events (short_code, referrer, referrer_domain, is_unique, clicked_at, user_agent, device_type, referrer_type) VALUES ($1, NULLIF($2,''), NULLIF($3,''), $4, $5, NULLIF($6,''), NULLIF($7,''), NULLIF($8,''))",
 		e.ShortCode, e.Referrer, e.ReferrerDomain, e.IsUnique, clickTime(e.ClickedAt),
+		e.UserAgent, e.DeviceType, e.ReferrerType,
 	); err != nil {
 		return err
 	}
@@ -1286,18 +2414,17 @@ func (s *SingleStore) LogClick(e ClickEvent) error {
 	return tx.Commit()
 }
 
-// LEARN:
-//
-//	Kenapa: Urutan baru ditulis dalam SATU transaction: semua UPDATE position
-//	commit bersama, atau rollback semua kalau 1 gagal. Tanpa transaction (N
-//	query terpisah), request yang mati di tengah jalan meninggalkan urutan
-//	setengah-jadi = data korup yang tidak terdeteksi. Tiap baris dicek
-//	kepemilikan (WHERE creator_id) supaya user tidak bisa mengacak link orang.
-//	Trade-off: Transaction menahan lock baris selama update (mili-detik untuk
-//	puluhan baris, tidak masalah di skala ini); array raksasa akan menahan
-//	lock lama — makanya handler membatasi panjang order.
-//	Alternatif: N UPDATE tanpa transaction (simpel tapi tidak atomik), atau
-//	fractional indexing (sisip tanpa rewrite semua — hemat write tapi kompleks).
+// ReorderLinks writes the new order in ONE transaction: every position UPDATE
+// commits together, or all of them roll back if one fails. Without a
+// transaction (N separate queries), a request dying midway leaves a
+// half-applied order - undetected data corruption. Every row is
+// ownership-checked (WHERE creator_id) so a user cannot scramble someone
+// else's links. Trade-off: the transaction holds row locks during the update
+// (milliseconds for a few dozen rows, harmless at this scale); a huge array
+// would hold locks for a long time - hence the handler caps the order length.
+// Alternatives: N UPDATEs without a transaction (simple but not atomic), or
+// fractional indexing (insert without rewriting everything - fewer writes,
+// but complex).
 func (s *SingleStore) ReorderLinks(creatorID int64, order []string) error {
 	tx, err := s.primary.Begin()
 	if err != nil {

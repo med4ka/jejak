@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 
 const GO_API_URL = process.env.GO_API_URL || "http://localhost:8081";
 
-// Proxy hapus API key -> Go DELETE /api/keys/{id}. Cookie sesi diteruskan;
-// Go memverifikasi kepemilikan key (bukan milik = 404).
+// Proxy API key deletion -> Go DELETE /api/keys/{id}. The session cookie is
+// forwarded; Go verifies key ownership (a key not owned returns 404).
 export async function DELETE(req, { params }) {
   const cookie = req.headers.get("cookie") || "";
   let goRes;

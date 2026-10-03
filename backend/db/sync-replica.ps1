@@ -1,4 +1,4 @@
-# Manual replica sync — DEV TESTING ONLY, dijalankan manual sesuai kebutuhan.
+# Manual replica sync: DEV TESTING ONLY, dijalankan manual sesuai kebutuhan.
 #
 # Menyalin isi creators + urls + click_events dari primary (jejak) ke
 # replica (jejak_replica) dalam 1 perintah, supaya tidak tulis query manual
@@ -7,7 +7,7 @@
 # Ini TIDAK mengganti prinsip "replication lag itu sengaja untuk belajar"
 # (ARCHITECTURE.md §6): replikasi Postgres asli sync OTOMATIS; di sini ANDA
 # yang memutuskan kapan sync terjadi. Jangan pernah dijalankan otomatis
-# (cron/service/scheduler) — kalau otomatis, nilai belajarnya hilang.
+# (cron/service/scheduler): kalau otomatis, nilai belajarnya hilang.
 #
 # Aman diulang (idempotent): replica tidak menyimpan data unik (app tidak
 # pernah tulis ke replica), jadi DELETE + salin ulang tidak menghilangkan

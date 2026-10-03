@@ -1,8 +1,8 @@
--- Seed minimal untuk testing manual + demo sync manual ke replica.
--- Jalankan di database primary (jejak) DAN di database replica (jejak_replica)
--- supaya keduanya punya baris yang sama. Ini adalah "sync manual" yang
--- menggantikan streaming replication Postgres asli (lihat ARCHITECTURE.md §6).
--- Idempotent: aman dijalankan berulang (ON CONFLICT DO NOTHING).
+-- Minimal seed for manual testing + a demo of manual sync to the replica.
+-- Run it on the primary database (jejak) AND the replica (jejak_replica) so
+-- both hold the same rows. This is the "manual sync" that replaces real
+-- Postgres streaming replication (see ARCHITECTURE.md §6).
+-- Idempotent: safe to run repeatedly (ON CONFLICT DO NOTHING).
 
 INSERT INTO urls (short_code, original_url)
 VALUES ('abc123', 'https://example.com')

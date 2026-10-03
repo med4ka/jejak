@@ -40,17 +40,25 @@ func TestHandleUpdateProfileTheme(t *testing.T) {
 		t.Fatalf("darkroom: status = %d, want 200; body = %s", rr2.Code, rr2.Body.String())
 	}
 
-	// Preset eksperimen "glass" (preset 4) → 200.
-	for _, preset := range []string{"glass"} {
+	// The 8 later presets: experimental "glass" (preset 4) + "risoPrint"
+	// (preset 5) + the 4 playful presets "peach"/"lavender"/"matcha"/
+	// "sakura" (presets 6-9) + the 2 new presets "ocean"/"sunset"
+	// (presets 10-11) → 200.
+	for _, preset := range []string{"glass", "risoPrint", "peach", "lavender", "matcha", "sakura", "ocean", "sunset"} {
 		reqX := authedPut(s, h, 1, "/api/profile", `{"display_name":"Test","bio":"","avatar_url":"","socials":[],"theme":"`+preset+`"}`)
 		rrX := httptest.NewRecorder()
 		h.HandleUpdateMyProfile(rrX, reqX)
 		if rrX.Code != http.StatusOK {
 			t.Fatalf("%s: status = %d, want 200; body = %s", preset, rrX.Code, rrX.Body.String())
 		}
+		var respX map[string]any
+		json.Unmarshal(rrX.Body.Bytes(), &respX)
+		if respX["theme"] != preset {
+			t.Errorf("%s: echo theme = %v, want %s", preset, respX["theme"], preset)
+		}
 	}
 
-	// Legacy "night" is rejected on write (closed set = classic|darkroom|coral|glass).
+	// Legacy "night" is rejected on write (closed set of 11 presets; see validThemePreset).
 	req5 := authedPut(s, h, 1, "/api/profile", `{"display_name":"Test","bio":"","avatar_url":"","socials":[],"theme":"night"}`)
 	rr5 := httptest.NewRecorder()
 	h.HandleUpdateMyProfile(rr5, req5)
@@ -66,7 +74,7 @@ func TestHandleUpdateProfileTheme(t *testing.T) {
 		t.Fatalf("neon: status = %d, want 400; body = %s", rr3.Code, rr3.Body.String())
 	}
 
-	// GET returns validTheme(creator.Theme) — unknown coerces to "classic".
+	// GET returns validTheme(creator.Theme): unknown coerces to "classic".
 	s.creator.Theme = ""
 	req4 := authedReq(s, h, 1, "/api/profile", "")
 	req4.Method = http.MethodGet
@@ -78,7 +86,7 @@ func TestHandleUpdateProfileTheme(t *testing.T) {
 		t.Errorf("empty theme coerced to = %v, want classic", prof["theme"])
 	}
 
-	// Legacy "night" row on GET maps to "darkroom" (rebranding, bukan classic).
+	// A legacy "night" row on GET maps to "darkroom" (rebranding, not classic).
 	s.creator.Theme = "night"
 	rr6 := httptest.NewRecorder()
 	h.HandleGetMyProfile(rr6, authedReq(s, h, 1, "/api/profile", ""))
@@ -90,13 +98,13 @@ func TestHandleUpdateProfileTheme(t *testing.T) {
 }
 
 func TestHandleUploadAvatar(t *testing.T) {
-	// Fixture magic bytes — HEADER format ASLI (bukan cuma ekstensi).
+	// Fixture magic bytes: the format's real header, not just an extension.
 	jpeg := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0x00, 0x01, 0x01, 0x00, 0x00}
 	png := append(
 		[]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'},
 		[]byte{0x00, 0x00, 0x00, 0x0D, 'I', 'H', 'D', 'R', 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01}...,
 	)
-	// PHP shell yang berpenampilan .jpg — ancaman nyata, magic bytes WAJIB menolak.
+	// A PHP shell disguised as a .jpg: a real threat; the magic bytes must reject it.
 	phpShell := []byte("<?php system($_GET['c']); ?>")
 
 	t.Run("anonymous rejected", func(t *testing.T) {
@@ -117,7 +125,7 @@ func TestHandleUploadAvatar(t *testing.T) {
 		s := &fakeStore{creator: db.Creator{ID: 777001, DisplayName: "T", Theme: "classic"}}
 		h := newTestHandler(s)
 		h.Auth = auth.NewMemoryStore()
-		// Nama file sengaja BOHONG (.png) — ekstensi harus tetap .jpg dari magic bytes.
+		// The filename deliberately LIES (.png): the extension must still be .jpg, taken from the magic bytes.
 		req := authedMultipart(t, h, 777001, "avatar", "fake-name.png", jpeg)
 		rr := httptest.NewRecorder()
 		h.HandleUploadAvatar(rr, req)
@@ -202,8 +210,12 @@ func TestHandleUploadAvatar(t *testing.T) {
 		req := authedMultipart(t, h, 42, "avatar", "big.jpg", big)
 		rr := httptest.NewRecorder()
 		h.HandleUploadAvatar(rr, req)
-		if rr.Code != http.StatusBadRequest {
-			t.Fatalf("oversize status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+		// 413, not 400: MaxBytesReader caps the whole multipart body at
+		// 3 MB, so an over-limit upload surfaces as Request Entity Too
+		// Large (the deliberate security-fix contract; JSON handlers keep
+		// 400 for over-limit bodies, see decodeJSON).
+		if rr.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("oversize status = %d, want 413; body=%s", rr.Code, rr.Body.String())
 		}
 		if len(s.profileCalls) != 0 {
 			t.Fatalf("store written for oversize upload: %+v", s.profileCalls)

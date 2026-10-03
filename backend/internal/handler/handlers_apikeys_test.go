@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"jejak/internal/auth"
-	"jejak/internal/ratelimit"
 	"jejak/internal/db"
+	"jejak/internal/ratelimit"
 )
 
 func TestHandleGenerateAPIKey(t *testing.T) {
@@ -162,8 +162,9 @@ func TestHandleDeleteAPIKey(t *testing.T) {
 				req = authedReq(s, h, 42, "/api/keys/"+tt.id, "")
 				req.Method = http.MethodDelete
 			}
-			// Handler dipanggil langsung (tanpa ServeMux) jadi path values
-			// tidak terisi otomatis seperti saat lewat route pattern.
+			// The handler is invoked directly (no ServeMux), so path values
+			// are not populated automatically as they are through a route
+			// pattern.
 			req.SetPathValue("id", tt.id)
 			rr := httptest.NewRecorder()
 			h.HandleDeleteAPIKey(rr, req)

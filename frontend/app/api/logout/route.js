@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 
 const GO_API_URL = process.env.GO_API_URL || "http://localhost:8081";
 
-// Proxy logout -> Go. Teruskan cookie sesi MASUK (supaya Go tahu sesi
-// mana yang di-revoke) dan teruskan Set-Cookie balasan (clear cookie).
+// Proxy logout -> Go. Forward the INBOUND session cookie (so Go knows which
+// session to revoke) and forward the reply Set-Cookie (clear cookie).
 export async function POST(req) {
   const cookie = req.headers.get("cookie") || "";
 

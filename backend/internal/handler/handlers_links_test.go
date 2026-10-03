@@ -37,7 +37,7 @@ func TestHandleShorten(t *testing.T) {
 						t.Fatalf("generated code %q contains disallowed char %q", code, c)
 					}
 				}
-				// Creator is nil (anonymous request) — ownership must stay NULL.
+				// Creator is nil (anonymous request): ownership must stay NULL.
 				if s.created[0].creatorID != nil {
 					t.Fatalf("anonymous shorten got creatorID %v, want nil", *s.created[0].creatorID)
 				}
@@ -273,7 +273,7 @@ func TestHandleRedirectUnknownLink404(t *testing.T) {
 	}
 }
 
-// TestHandleRedirectDisabledLink410 proves the Fase 13 lifecycle is honored:
+// TestHandleRedirectDisabledLink410 proves the Phase 13 lifecycle is honored:
 // a link with is_active=false must NOT redirect (410 Gone) and must not leak
 // into a Location header. DB path (cache nil).
 func TestHandleRedirectDisabledLink410(t *testing.T) {
@@ -316,7 +316,7 @@ func TestHandleRedirectDisabledLinkCacheHit410(t *testing.T) {
 
 // TestHandleRedirectCacheHitActiveStillRedirects locks in that a cache hit for
 // an ACTIVE link keeps routing by device (and cleanly handles a cache that is
-// writable — the legacy code path always touched the store first).
+// writable: the legacy code path always touched the store first).
 func TestHandleRedirectCacheHitActiveStillRedirects(t *testing.T) {
 	s := &fakeStore{}
 	h := newTestHandler(s)
@@ -337,8 +337,11 @@ func TestHandleRedirectCacheHitActiveStillRedirects(t *testing.T) {
 }
 
 // mapCache is a trivial in-memory cache.Cache double for redirect tests.
+// ttls records the TTL of every Set (key → last ttl) so tests can prove the
+// expiry-aware clamp (redirectTTL) actually reaches the cache layer.
 type mapCache struct {
 	data map[string]string
+	ttls map[string]int64
 }
 
 func (c *mapCache) Get(key string) (string, bool) {
@@ -350,7 +353,11 @@ func (c *mapCache) Set(key, value string, ttl int64) error {
 	if c.data == nil {
 		c.data = map[string]string{}
 	}
+	if c.ttls == nil {
+		c.ttls = map[string]int64{}
+	}
 	c.data[key] = value
+	c.ttls[key] = ttl
 	return nil
 }
 

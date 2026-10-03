@@ -1,9 +1,11 @@
 -- +goose Up
--- Fase 10: preset tema halaman publik kreator (/u/[username]).
--- Preset TERBATAS: classic (print-white + flash-yellow, default sekarang),
+-- Fase 10: preset themes for the creator's public page (/u/[username]).
+-- LIMITED presets: classic (print-white + flash-yellow, current default),
 -- night (ink bg + print-white text), coral (print-white + flash-coral).
--- Hanya 3 nilai — validasi ada di handler; kolom tetap varchar biasa karena
--- ini enum kecil yang KONSUMENNYA frontend (bukan query/join/agg).
--- Default 'classic' = perilaku lama, semua akun existing otomatis classic.
+-- Only 3 values - validation lives in the handler; the column stays a plain
+-- varchar because this is a small enum CONSUMED by the frontend (never
+-- queried, joined, or aggregated).
+-- Default 'classic' = old behavior; every existing account becomes classic
+-- automatically.
 
 ALTER TABLE creators ADD COLUMN IF NOT EXISTS theme VARCHAR(20) NOT NULL DEFAULT 'classic';

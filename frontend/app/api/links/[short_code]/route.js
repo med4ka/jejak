@@ -2,10 +2,10 @@ import { NextResponse } from "next/server";
 
 const GO_API_URL = process.env.GO_API_URL || "http://localhost:8081";
 
-// Proxy edit link -> Go PUT /api/links/{short_code}. Cookie sesi diteruskan
-// (Go menolak tanpa login + memverifikasi kepemilikan — bukan milik = 404).
-// Segmen statis "reorder" menang atas route dinamis ini di Next, jadi
-// /api/links/reorder tetap pakai proxy-nya sendiri.
+// Proxy link edit -> Go PUT /api/links/{short_code}. The session cookie is
+// forwarded (Go rejects unauthenticated requests and verifies ownership: a
+// link not owned returns 404). The static "reorder" segment wins over this
+// dynamic route in Next, so /api/links/reorder keeps its own proxy.
 export async function PUT(req, { params }) {
   const shortCode = params.short_code;
   const cookie = req.headers.get("cookie") || "";

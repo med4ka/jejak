@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"jejak/internal/auth"
-	"jejak/internal/ratelimit"
 	"jejak/internal/db"
+	"jejak/internal/ratelimit"
 )
 
 // TestHandleLoginRateLimit proves the brute-force throttle: 5 failed attempts

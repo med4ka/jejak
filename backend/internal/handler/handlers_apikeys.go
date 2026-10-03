@@ -11,30 +11,27 @@ import (
 	"strings"
 	"time"
 
-	"jejak/internal/middleware"
 	"jejak/internal/db"
+	"jejak/internal/middleware"
 )
 
-// LEARN:
-//
-//	Kenapa API key di-hash (SHA-256) sebelum disimpan — prinsip yang SAMA
-//	dengan password. Kalau database bocor (dump, backup bocor, SQLi), isi
-//	api_keys hanyalah deretan hash; attacker tidak langsung bisa memakai key
-//	apa pun. Kecepatan hash dipilih beda dari bcrypt karena: (1) key kita
-//	random 128-bit ("jjk_" + 32 hex) — brute-force offline mustahil secara
-//	komputasi meski pakai SHA-256, tidak seperti password user yang berentropy
-//	rendah; (2) hash API key dicek di SETIAP request public API, bcrypt = +100ms
-//	latensi per panggilan, SHA-256 = mikrodetik. Trade-off-nya jelas: fungsi
-//	lambat tidak perlu untuk materi berentropy tinggi yang diautentikasi sering.
+// hashAPIKey hashes an API key with SHA-256 before storage: the same
+// principle as passwords: if the database leaks (dump, exposed backup,
+// SQLi), api_keys holds only hashes and no key is usable directly. A fast
+// hash is preferred over bcrypt because keys are random 128-bit values
+// ("jjk_" + 32 hex), so offline brute force stays computationally impossible
+// even with SHA-256 (unlike low-entropy user passwords), and the hash is
+// verified on every public API request where bcrypt would add ~100 ms per
+// call and SHA-256 takes microseconds.
 func hashAPIKey(key string) string {
 	h := sha256.Sum256([]byte(key))
 	return hex.EncodeToString(h[:])
 }
 
-// generateAPIKey memproduksi key baru. Format "jjk_" + 32 hex (16 byte / 128
-// bit dari crypto/rand — sumber CSPRNG, jangan pakai math/rand untuk materi
-// sekret). Plaintext hanya ada di memori fungsi pembuatnya lalu dikirim ke
-// response SEKALI; yang masuk database hanyalah hash-nya.
+// generateAPIKey produces a new key: "jjk_" + 32 hex (16 bytes / 128 bits
+// from crypto/rand: a CSPRNG; math/rand must never be used for secret
+// material). The plaintext exists only in this function's memory and is sent
+// in the response ONCE; only its hash reaches the database.
 func generateAPIKey() (string, error) {
 	var buf [16]byte
 	if _, err := rand.Read(buf[:]); err != nil {
@@ -43,7 +40,6 @@ func generateAPIKey() (string, error) {
 	return "jjk_" + hex.EncodeToString(buf[:]), nil
 }
 
-// bearerKeyFromRequest mengekstrak "Authorization: Bearer <key>".
 func bearerKeyFromRequest(r *http.Request) (string, bool) {
 	if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
 		return "", false
@@ -76,10 +72,11 @@ func keysJSON(keys []db.APIKey) []map[string]any {
 	return out
 }
 
-// HandleGenerateAPIKey creates a key (POST /api/keys). Session auth WAJIB —
-// generate key harus lewat dashboard yang login, bukan lewat API key lain.
-// Response memuat plaintext key SEKALI SAJA; sesudah ini key tidak pernah
-// bisa dilihat lagi (standar API key generation).
+// HandleGenerateAPIKey creates a key (POST /api/keys). Session auth is
+// MANDATORY: key generation must happen from a logged-in dashboard, never
+// through another API key. The response carries the plaintext key EXACTLY
+// ONCE; afterwards the key can never be viewed again, which is the standard
+// for API key generation.
 func (h *Handler) HandleGenerateAPIKey(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -120,8 +117,8 @@ func (h *Handler) HandleGenerateAPIKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Plaintext key — SENDANG response ini yang memuatnya. Response kedua dan
-	// seterusnya (GET /api/keys) hanya memuat hash (label/timestamps).
+	// The plaintext key appears ONLY in this response; every later response
+	// (GET /api/keys) returns metadata only: id, label, timestamps.
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]any{
@@ -133,7 +130,7 @@ func (h *Handler) HandleGenerateAPIKey(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleListAPIKeys returns the caller's keys (GET /api/keys). Session auth
-// required. Plaintext key TIDAK pernah dikirim — hanya id/label/timestamps.
+// required. The plaintext key is NEVER sent: only id, label and timestamps.
 func (h *Handler) HandleListAPIKeys(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -159,8 +156,9 @@ func (h *Handler) HandleListAPIKeys(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleDeleteAPIKey removes one key (DELETE /api/keys/{id}). Session auth
-// required, scoped WHERE creator_id (key kepunyaan orang lain / id asing ->
-// 404, bukan 403, sama prinsip anti-leak seperti UpdateLink/Reorder).
+// required, scoped by WHERE creator_id: another creator's key or a foreign
+// id yields 404 rather than 403, the same anti-leak principle used by
+// UpdateLink/Reorder.
 func (h *Handler) HandleDeleteAPIKey(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -190,13 +188,13 @@ func (h *Handler) HandleDeleteAPIKey(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"ok":true}`))
 }
 
-// creatorFromAPIKey mengautentikasi request public API via Bearer token →
-// SHA-256 hash → lookup api_keys → kembalikan creatorID. Error = 401 atau
-// 500 (dihandle oleh caller). LEARN: Sama seperti password — hash hanya
-// untuk penyimpanan; pencocokan dilakukan dengan meng-hash input, bukan
-// mendekrip hash (karena SHA-256 one-way). Update last_used_at dilakukan
-// fire-and-forget: request SUDAH sukses pada titik ini, gagal update
-// timestamp hanya log (tidak boleh gagalkan request). Lihat LEARN di atas.
+// creatorFromAPIKey authenticates a public API request: Bearer token →
+// SHA-256 hash → api_keys lookup → creatorID. Errors surface as 401 or 500
+// and are handled by the caller. As with passwords, the hash exists only for
+// storage: matching re-hashes the input instead of decrypting the stored
+// value (SHA-256 is one-way). The last_used_at update is fire-and-forget:
+// the request has already succeeded at this point, so a failed timestamp
+// write is only logged and must never fail the request.
 func (h *Handler) creatorFromAPIKey(r *http.Request) (*int64, error) {
 	raw, ok := bearerKeyFromRequest(r)
 	if !ok || !strings.HasPrefix(raw, "jjk_") {
@@ -214,19 +212,17 @@ func (h *Handler) creatorFromAPIKey(r *http.Request) (*int64, error) {
 	return &id, nil
 }
 
-// LEARN:
-//
-//	Kenapa HandlerV1Shorten memakai API key, BUKAN session cookie: cookie
-//	memerlukan browser (login + cookie dikelola browser). Kreator yang
-//	otomatisasi (curl, script, integrasi) tidak punya session browser — mereka
-//	punya key. Jadi, muncul 2 jalur auth yang menghasilkan "creator context"
-//	yang sama (id kreator): session cookie (dashboard) dan Bearer API key
-//	(public API). doShorten tidak tahu (dan tidak perlu tahu) dari jalur mana
-//	id datang — polimorfisme sumber identitas, satu implementasi bisnis.
-//	Rate limit endpoint ini dipisah dari browser/login: 100 req/menit PER KEY
-//	(dibanding 5 gagal/menit untuk login). Bucket di-key oleh hash key, jadi
-//	tiap key punya jatah sendiri; key mati tetap ikut di-throttle sesuai
-//	hash-nya (tidak merugikan key lain).
+// HandleV1Shorten authenticates with an API key rather than a session
+// cookie: cookies require a browser (login plus cookie handling), while
+// creators automating through curl, scripts or integrations hold a key
+// instead. Two auth paths therefore yield the same creator context (the
+// creator id): the session cookie for the dashboard and the Bearer API key
+// for the public API: and doShorten neither knows nor needs to know which
+// path supplied the id: polymorphic identity sources, one business
+// implementation. The rate limit is kept separate from browser/login traffic:
+// 100 req/minute PER KEY (versus 5 failures/minute for login), keyed by the
+// key's hash so every key gets its own budget and a dead key is throttled
+// under its own hash without affecting other keys.
 func (h *Handler) HandleV1Shorten(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -239,7 +235,8 @@ func (h *Handler) HandleV1Shorten(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Rate limit: 100 req/menit per key. Allow + Record = konsumsi 1 kuota.
+	// Rate limit: 100 req/minute per key; Allow + Record together consume a
+	// single unit of quota.
 	if h.APILimiter != nil {
 		raw, _ := bearerKeyFromRequest(r)
 		keyHash := hashAPIKey(raw)

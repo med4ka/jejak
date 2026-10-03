@@ -1,9 +1,9 @@
 -- +goose Up
--- Fase 9: kustomisasi profil kreator.
--- avatar_url = URL gambar (varchar, nullable) — BUKAN file upload, tetap simpel.
--- socials = array JSON [{platform, url}] (JSONB, default []) — sengaja BUKAN
--- tabel terpisah: terlalu kecil untuk butuh relasi sendiri (lihat LEARN di
--- db.go soal keputusan ini). Dijalankan di primary DAN replica.
+-- Fase 9: creator profile customization.
+-- avatar_url = image URL (varchar, nullable) - NOT a file upload, kept simple.
+-- socials = JSON array [{platform, url}] (JSONB, default []) - deliberately
+-- NOT a separate table: too small to justify its own relation (see the
+-- SocialLink comment in db.go for that decision). Run on primary AND replica.
 
 ALTER TABLE creators ADD COLUMN IF NOT EXISTS avatar_url VARCHAR NULL;
 ALTER TABLE creators ADD COLUMN IF NOT EXISTS socials JSONB NULL DEFAULT '[]';

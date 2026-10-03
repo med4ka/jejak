@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 
 const GO_API_URL = process.env.GO_API_URL || "http://localhost:8081";
 
-// Proxy same-origin -> Go API supaya browser tidak kena CORS.
-// Browser hanya bicara ke Next; Next yang teruskan ke Go server-side.
-// Cookie sesi ikut diteruskan supaya link yang dibuat user login otomatis
-// ke-assign ke creator-nya (tanpa ini semua link dashboard jadi anonim).
+// Same-origin proxy -> Go API so the browser never triggers CORS.
+// The browser only talks to Next; Next forwards to Go server-side.
+// The session cookie is forwarded as well so links created by a logged-in user
+// are automatically assigned to their creator (without it, every dashboard
+// link would be anonymous).
 export async function POST(req) {
   let body;
   try {

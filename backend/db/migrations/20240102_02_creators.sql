@@ -1,7 +1,7 @@
 -- +goose Up
--- Fase 9: tabel creators + relasi opsional urls.creator_id.
--- creator_id NULLABLE supaya short-link anonim (Fase 0-8) tetap valid.
--- Dijalankan di database primary DAN replica (keduanya butuh skema sama).
+-- Fase 9: creators table + optional urls.creator_id relation.
+-- creator_id is NULLABLE so anonymous short links (Fase 0-8) stay valid.
+-- Run against BOTH the primary and the replica (both need the same schema).
 
 CREATE TABLE IF NOT EXISTS creators (
     id SERIAL PRIMARY KEY,

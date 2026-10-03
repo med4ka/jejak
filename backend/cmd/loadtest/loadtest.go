@@ -12,19 +12,20 @@ import (
 	"time"
 )
 
-// LEARN:
-//   Kenapa: Fungsi ini menjalankan N request dengan C koneksi concurrent ke satu
-//   endpoint, lalu melaporkan RPS + latency. Konsep design: performance measurement
-//   dengan parameter SAMA persis tiap fase, supaya angka baseline vs optimasi bisa
-//   dibandingkan secara adil (apel vs apel, bukan apel vs jeruk).
-//   Trade-off: Harness sederhana ini tidak memodelkan pola traffic nyata (burst,
-//   think time, variasi endpoint) — angkanya hanya untuk perbandingan relatif,
-//   bukan prediksi kapasitas production.
-//   Alternatif: k6/hey untuk skenario kompleks, tapi tool sendiri cukup untuk
-//   baseline lokal dan tidak menambah dependensi.
+// Rationale: this function runs N requests with C concurrent connections
+// against one endpoint, then reports RPS + latency. Design concept:
+// performance measurement with IDENTICAL parameters in every phase so that
+// baseline versus optimization numbers can be compared fairly (apples to
+// apples, not apples to oranges).
+// Trade-off: this simple harness does not model real traffic patterns (bursts,
+// think time, endpoint variety): the numbers are relative comparisons only,
+// not predictions of production capacity.
+// Alternative: k6/hey for complex scenarios, but a built-in tool suffices for
+// a local baseline and adds no dependency.
 func runLoadTest(target string, total, concurrency int) {
-	// Redirect TIDAK di-follow: untuk endpoint /r/{code}, 302 ADALAH sukses.
-	// Kalau di-follow, yang terukur malah example.com (di luar sistem kita).
+	// Redirects are NOT followed: for the /r/{code} endpoint a 302 IS success.
+	// If they were followed, what gets measured is example.com (outside this
+	// system).
 	client := &http.Client{
 		Timeout: 15 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -92,14 +93,12 @@ func runLoadTest(target string, total, concurrency int) {
 	fmt.Printf("RESULT status=%v\n", statusCount)
 }
 
-// LEARN:
-//   Kenapa: Fungsi ini mendapatkan informasi sistem (Goroutines, CPU) pada awal baseline.
-//   Konsep design yang terkait: resource awareness - tahu resource apa yang
-//   sudah digunakan sebelum load test, agar bisa dibandingkan setelah.
-//   Trade-off: Information collection memiliki overhead kecil, tetapi memberikan context
-//   berharga tentang state sistem sebelum traffic datang.
-//   Alternatif: Bisa pakai prometheus metrics atau runtime.MemProfileRate,
-//   tapi untuk baseline sederhana, runtime info cukup.
+// CaptureSystemState records system information (goroutines, CPU) at the start
+// of a baseline. Design concept: resource awareness: knowing which resources
+// are already in use before the load test makes results comparable afterwards.
+// Trade-off: collection has small overhead but provides valuable context about
+// system state before traffic arrives. Alternative: Prometheus metrics or
+// runtime.MemProfileRate, but runtime info suffices for a simple baseline.
 func CaptureSystemState() {
 	log.Printf("System Info:")
 	log.Printf("  GOMAXPROCS: %d", runtime.GOMAXPROCS(0))
@@ -107,14 +106,12 @@ func CaptureSystemState() {
 	log.Printf("  Goroutines: %d", CountGoroutines())
 }
 
-// LEARN:
-//   Kenapa: Fungsi bantuan menghitung jumlah goroutine aktif.
-//   Konsep design yang terkait: goroutine monitoring - dalam server Go, setiap
-//   request bisa membuat goroutine baru. Mengetahui baseline membantu mendeteksi
-//   memory leaks atau goroutine leaks pada masa depan.
-//   Trade-off: Memerlukan iterate through runtime.Gosched, overhead negligible.
-//   Alternatif: Bisa pakai third-party library seperti pprof, tapi untuk baseline
-//   sederhana, fungsi ini cukup.
+// CountGoroutines returns the number of active goroutines. Design concept:
+// goroutine monitoring: in a Go server every request can start a new
+// goroutine, and knowing the baseline helps detect memory or goroutine leaks
+// later. Trade-off: negligible overhead (a single runtime query).
+// Alternative: a third-party tool such as pprof, but for a simple baseline
+// this function suffices.
 func CountGoroutines() int {
 	return runtime.NumGoroutine()
 }

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 const GO_API_URL = process.env.GO_API_URL || "http://localhost:8081";
 
-// Proxy login -> Go (teruskan Set-Cookie, sama seperti register).
+// Proxy login -> Go (forward Set-Cookie, same as register).
 export async function POST(req) {
   const body = await req.json();
 

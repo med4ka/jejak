@@ -1,0 +1,639 @@
+{
+  "nav": {
+    "brand": "JEJAK",
+    "aria": {
+      "mainMenu": "Menu utama",
+      "mobileMenu": "Menu mobile",
+      "drawer": "Menu navigasi",
+      "openMenu": "Buka menu",
+      "closeMenu": "Tutup menu",
+      "accountMenu": "Menu akun"
+    },
+    "menu": {
+      "features": "Fitur",
+      "dashboard": "Dashboard",
+      "demo": "Demo",
+      "faq": "FAQ"
+    },
+    "features": {
+      "customSlug": {
+        "label": "Custom Slug",
+        "desc": "Link terlihat profesional"
+      },
+      "smartLink": {
+        "label": "Smart Link",
+        "desc": "Redirect per device"
+      },
+      "qrCode": {
+        "label": "QR Code",
+        "desc": "Siap dipindai"
+      },
+      "analytics": {
+        "label": "Analytics",
+        "desc": "Pantau performa"
+      }
+    },
+    "cta": {
+      "newLink": "Link Baru",
+      "login": "Masuk",
+      "register": "Daftar Gratis →"
+    },
+    "account": {
+      "title": "@{username}",
+      "titleFallback": "Akun",
+      "nameFallback": "Pengguna",
+      "profile": "Profil",
+      "logout": "Keluar"
+    },
+    "claimMessage": "{count} link berhasil ditambahkan ke akunmu"
+  },
+  "landing": {
+    "hero": {
+      "badge": "LINK-IN-BIO UNTUK KREATOR",
+      "headline": "Satu halaman,\nsemua link kamu.",
+      "subheadline": "Persingkat semua link sosial-mu jadi satu halaman yang bisa dibagikan: dengan smart redirect per device dan analytics lengkap di baliknya.",
+      "proof": "Coba dulu: link baru jadi tanpa daftar, langsung bisa dibagikan."
+    },
+    "mockup": {
+      "badge": "contoh",
+      "copyButton": "Salin"
+    },
+    "socialProof": {
+      "caption": "Satu halaman untuk link dari semua platform kamu",
+      "platforms": {
+        "youtube": "Youtube",
+        "shopee": "Shopee",
+        "instagram": "Instagram",
+        "tiktok": "TikTok",
+        "tokopedia": "Tokopedia",
+        "spotify": "Spotify"
+      },
+      "stats": {
+        "free": {
+          "value": "Gratis",
+          "label": "fitur inti tanpa biaya"
+        },
+        "instant": {
+          "value": "Instan",
+          "label": "link jadi dalam 1 langkah"
+        },
+        "honest": {
+          "value": "Jujur",
+          "label": "angka klik dari data asli"
+        }
+      }
+    },
+    "features": {
+      "heading": "Kenapa Jejak?",
+      "items": {
+        "customSlug": {
+          "title": "Custom Slug",
+          "desc": "Tentuin sendiri kode pendek biar brand-nya kelihatan, bukan random string. Misal jejak.app/r/nama-kamu."
+        },
+        "smartLink": {
+          "title": "Smart Link",
+          "desc": "Satu link, tujuan beda tiap device: arahin visitor HP ke WhatsApp, yang desktop ke website. Otomatis."
+        },
+        "qrCode": {
+          "title": "QR Code",
+          "desc": "Link kamu jadi QR siap pindai di poster, kemasan, atau kartu nama. Ganti link, QR ikut update."
+        },
+        "analytics": {
+          "title": "Analytics",
+          "desc": "Pantau klik, unique visitor, dan performa tiap link: semua di satu panggung, angka jujur bukan dummy."
+        }
+      }
+    },
+    "demo": {
+      "heading": "Coba lihat rupa link kamu",
+      "slugLabel": "Tulis slug kamu",
+      "slugPlaceholder": "nama-kamu",
+      "previewNote": "Preview link kamu: dengan QR di samping yang ikut berubah realtime."
+    },
+    "faq": {
+      "heading": "Punya pertanyaan?",
+      "items": {
+        "comparison": {
+          "q": "Apa bedanya Jejak dengan bit.ly atau Linktree?",
+          "a": "Jejak itu all-in-one: satu aplikasi untuk persingkat link (pakai custom slug), bikin halaman profil link-in-bio bernama, dan lihat dashboard hitungan klik per link: plus QR code dan tema cetak indie. Jadi kamu ngga perlu numpuk beberapa layanan sekaligus."
+        },
+        "free": {
+          "q": "Apakah ini gratis?",
+          "a": "Ya. Dashboard, halaman profil publik, custom slug, dan hitungan klik semua gratis di tahap ini: ngga perlu kartu. Kalau nanti ada fitur berbayar, bakal diumumkan jelas duluan, bukan diam-diam."
+        },
+        "customSlug": {
+          "q": "Bisa pakai nama / custom slug sendiri?",
+          "a": "Bisa. Itu justru fitur inti Jejak: kamu tentukan sendiri kode pendeknya (misal jejak.app/r/nama-kamu) biar gampang diingat & dari dashboard pun bisa lihat hitungan klik tiap link. Bukan string acak."
+        },
+        "analytics": {
+          "q": "Apakah analytics / hitungan klik langsung berfungsi?",
+          "a": "Langsung. Tiap link punya hitungan klik yang muncul di dashboard dan di halaman profil: angka jujur sesuai klik asli, bukan dummy biar keliatan ramai. Plus QR code per link yang ikut terbaca."
+        }
+      }
+    },
+    "accent": {
+      "title": "Gratis.",
+      "subtitle": "Dashboard, custom slug, QR, dan analytics: tanpa kartu di tahap ini.",
+      "eyebrow": "untuk kreator indie"
+    },
+    "cta": {
+      "heading": "Tertarik? Daftar gratis sekarang.",
+      "subtext": "Ngga perlu card, ngga perlu ribet: langsung persingkat link kamu, dan lihat analytics-nya.",
+      "button": "Daftar Gratis"
+    }
+  },
+  "footer": {
+    "brand": "Jejak",
+    "tagline": "Satu halaman untuk semua link kamu: dibikin untuk kreator indie Indonesia.",
+    "columnTitles": {
+      "product": "Produk",
+      "company": "Perusahaan",
+      "legal": "Legal"
+    },
+    "links": {
+      "shorten": "Shorten",
+      "linkInBio": "Link-in-bio",
+      "qrCode": "QR Code",
+      "contact": "Kontak",
+      "privacy": "Kebijakan Privasi",
+      "terms": "Syarat & Ketentuan"
+    },
+    "copyright": "© {year} Jejak: dicetak dengan {heart} di Indonesia"
+  },
+  "dashboard": {
+    "metadata": {
+      "title": "Dashboard: Jejak",
+      "description": "Edit profil kreator dan lihat link + analytics."
+    },
+    "heading": "Dashboard",
+    "loading": {
+      "general": "Memuat...",
+      "dashboardLabel": "Memuat dashboard"
+    },
+    "notLoggedIn": "Masuk dulu lewat tombol Masuk di navbar untuk edit profil.",
+    "redirectNotice": "Mengalihkan...",
+    "tabs": {
+      "ringkasan": "Ringkasan",
+      "linkSaya": "Link Saya",
+      "analytics": "Analytics",
+      "profile": "Profil",
+      "apiKeys": "API Keys",
+      "settings": "Pengaturan"
+    },
+    "actions": {
+      "copy": "Salin",
+      "saving": "Menyimpan...",
+      "creating": "Membuat..."
+    },
+    "ringkasan": {
+      "greeting": "Halo, {displayName}",
+      "greetingFallback": "Halo",
+      "subtitle": "Ini ringkasan Jejak kamu hari ini.",
+      "stats": {
+        "totalLinks": "Total Link Aktif",
+        "totalClicks": "Total Klik",
+        "uniqueClicks30d": "Klik Unik (30 hari)",
+        "growthPct": "Growth %"
+      },
+      "trendTitle": "Tren 30 Hari Terakhir",
+      "topLinksTitle": "Link Terpopuler",
+      "topLinks": {
+        "clickCount": "{count} klik"
+      }
+    },
+    "links": {
+      "title": "Link saya",
+      "welcome": {
+        "heading": "Selamat datang! Mulai dari sini →",
+        "step1": "1. {action}.",
+        "step1Action": "↑ Buat short-link pertamamu di form atas",
+        "step2": "2. {action} biar halaman publikmu siap dibagikan.",
+        "step2Action": "Lengkapi profil"
+      },
+      "toolbar": {
+        "bulkImport": "Import Banyak",
+        "qrDownloadTitle": "Unduh QR semua link (atau sesuai filter tag) dalam 1 ZIP: maks 200",
+        "qrDownload": "Unduh QR"
+      },
+      "filter": {
+        "label": "Filter tag:",
+        "allOption": "Semua"
+      },
+      "row": {
+        "dragDisabledTitle": "Reset filter untuk mengurutkan",
+        "dragTitle": "Tarik untuk mengurutkan",
+        "featureTitle": "Jadikan unggulan",
+        "unfeatureTitle": "Hapus unggulan",
+        "meta": "/{shortCode} · {count} klik",
+        "editTooltip": "Atur URL per-device & tag",
+        "edit": "Edit",
+        "qr": "QR",
+        "activateTooltip": "Aktifkan kembali (redirect jalan lagi)",
+        "deactivateTooltip": "Nonaktifkan link (redirect jadi 410, tetap tampil di dashboard)",
+        "active": "Aktif",
+        "inactive": "Nonaktif",
+        "badges": {
+          "expired": "Expired",
+          "endsIn": "Ends in {hours}h"
+        }
+      },
+      "order": {
+        "savingOrder": "Menyimpan urutan...",
+        "orderSaved": "Urutan tersimpan.",
+        "orderFailed": "Gagal menyimpan: urutan dikembalikan.",
+        "savingFeature": "Menyimpan unggulan...",
+        "removingFeature": "Menghapus unggulan...",
+        "featureSaved": "Unggulan disimpan.",
+        "featureRemoved": "Unggulan dihapus.",
+        "savingStatus": "Menyimpan status...",
+        "statusActive": "Link aktif kembali.",
+        "statusInactive": "Link dinonaktifkan.",
+        "failed": "Gagal: perubahan dibatalkan."
+      }
+    },
+    "analytics": {
+      "ranges": {
+        "last7Days": "7 hari",
+        "last30Days": "30 hari",
+        "last90Days": "90 hari"
+      },
+      "devices": {
+        "desktop": "Desktop",
+        "mobile": "Ponsel",
+        "tablet": "Tablet",
+        "bot": "Bot",
+        "unknown": "Tidak diketahui"
+      },
+      "referrers": {
+        "direct": "Langsung",
+        "search": "Mesin pencari",
+        "social": "Media sosial",
+        "chat": "Aplikasi pesan",
+        "other": "Lainnya"
+      },
+      "exports": {
+        "daily": "Ringkasan harian",
+        "perLink": "Per link",
+        "rawClicks": "Klik mentah"
+      },
+      "deviceTitle": "Perangkat",
+      "referrerTitle": "Sumber",
+      "sourceOfData": "Sumber data: {dataPer}",
+      "exportTitle": "Ekspor CSV",
+      "exportDescription": "Unduh data rentang {rangeLabel} untuk dibuka di spreadsheet. Maksimal 10.000 baris per file; bila data lebih, file mencantumkan catatan pemotongan di kolom terakhir."
+    },
+    "chart": {
+      "heading": "Klik {days} hari terakhir",
+      "loading": "Memuat grafik...",
+      "empty": "Belum ada klik {days} hari terakhir: bagikan link-mu supaya grafiknya hidup.",
+      "tooltipClickCount": "{count} klik",
+      "months": {
+        "jan": "Jan",
+        "feb": "Feb",
+        "mar": "Mar",
+        "apr": "Apr",
+        "may": "Mei",
+        "jun": "Jun",
+        "jul": "Jul",
+        "aug": "Agu",
+        "sep": "Sep",
+        "oct": "Okt",
+        "nov": "Nov",
+        "dec": "Des"
+      }
+    },
+    "emptyStates": {
+      "noLinks": "Belum ada link. Buat dari halaman utama dulu.",
+      "noTagMatch": "Tidak ada link dengan tag ini.",
+      "noKeys": "Belum ada key: buat satu lewat formulir di atas.",
+      "noTopLinks": "Belum ada link: buat dulu di tab Link Saya.",
+      "noClicks30d": "Belum ada klik 30 hari terakhir.",
+      "noClicksInRange": "Belum ada klik di rentang ini."
+    },
+    "settings": {
+      "profile": {
+        "publicPageLabel": "Halaman publikmu:",
+        "viewProfile": "Lihat Profil",
+        "displayNameLabel": "Nama tampil",
+        "bioLabel": "Bio (maks 500)",
+        "avatarLabel": "Avatar",
+        "avatarChange": "Ganti foto",
+        "avatarAlt": "Avatar",
+        "avatarFileHint": "Foto baru: akan diunggah saat Simpan Profil.",
+        "avatarUrlLabel": "... atau URL avatar langsung (kosongkan = tanpa avatar)",
+        "avatarUrlPlaceholder": "https://...",
+        "socialsLabel": "Sosial (maks 10)",
+        "socialPlatformPlaceholder": "Platform (mis. IG)",
+        "socialUrlPlaceholder": "https://...",
+        "removeSocialAria": "Hapus",
+        "addSocial": "+ Tambah sosial",
+        "themeLabel": "Tema halaman publik",
+        "themeOptionAria": "Tema {themeName}",
+        "saveButton": "Simpan Profil",
+        "savedNotice": "Profil tersimpan."
+      },
+      "apiKeys": {
+        "docsToggle": "Cara pakai API",
+        "docsExampleIntro": "Contoh pemanggilan:",
+        "labelLabel": "Label (opsional, untuk dikenali)",
+        "labelPlaceholder": "mis. CI script",
+        "createButton": "Buat Key Baru",
+        "generatedWarning": "Simpan sekarang: tidak akan ditampilkan lagi!",
+        "activeKeysTitle": "Key aktif",
+        "noLabel": "(tanpa label)",
+        "keyMeta": "dibuat {createdAt} · terakhir dipakai {lastUsedAt}",
+        "deleteButton": "Hapus",
+        "deleteConfirm": "Hapus API key ini? Integrasi yang memakainya akan berhenti bekerja.",
+        "createdNotice": "Key berhasil dibuat. Salin sekarang: tidak akan ditampilkan lagi.",
+        "deletedNotice": "Key dihapus."
+      },
+      "account": {
+        "email": {
+          "title": "Ganti Email",
+          "description": "Email baru dipakai untuk akunmu. Password wajib untuk konfirmasi.",
+          "emailLabel": "Email baru",
+          "emailPlaceholder": "nama@example.com",
+          "passwordLabel": "Password saat ini",
+          "submit": "Simpan Email"
+        },
+        "password": {
+          "title": "Ganti Password",
+          "description": "Setelah ganti, semua device lain otomatis keluar.",
+          "currentLabel": "Password sekarang",
+          "newLabel": "Password baru (min 8 karakter)",
+          "confirmLabel": "Ulangi password baru",
+          "submit": "Simpan Password"
+        },
+        "danger": {
+          "title": "Zona Bahaya",
+          "logoutTitle": "Logout dari semua device",
+          "logoutDescription": "Akhiri sesi di semua perangkat, termasuk yang ini.",
+          "logoutButton": "Logout semua",
+          "deleteTitle": "Hapus akun",
+          "deleteDescription": "Menghapus profil, link, analytics, dan API key secara permanen.",
+          "deleteButton": "Hapus Akun"
+        },
+        "confirmLogout": {
+          "title": "Logout dari semua device?",
+          "description": "Semua sesi aktif (termasuk yang ini) akan berakhir. Kamu perlu login ulang di tiap perangkat.",
+          "confirmLabel": "Ya, logout semua"
+        },
+        "confirmDelete": {
+          "title": "Hapus akun permanen?",
+          "description": "Tindakan ini tidak bisa dibatalkan. Profil, seluruh link, analytics, dan API key akan hilang selamanya.",
+          "confirmLabel": "Hapus Permanen",
+          "typeToken": "HAPUS",
+          "passwordLabel": "Password saat ini (wajib)"
+        }
+      }
+    }
+  },
+  "onboarding": {
+    "regionLabel": "Panduan memulai",
+    "title": "Mulai di sini",
+    "closeLabel": "Tutup panduan",
+    "progressLabel": "Progres onboarding",
+    "steps": {
+      "link": {
+        "label": "Buat link pertama kamu",
+        "cta": "Buat Link"
+      },
+      "profile": {
+        "label": "Lengkapi profil publik",
+        "cta": "Lengkapi"
+      },
+      "share": {
+        "label": "Bagikan halaman publik",
+        "cta": "Bagikan"
+      }
+    }
+  },
+  "auth": {
+    "usernamePlaceholder": "username",
+    "login": {
+      "ariaLabel": "Masuk",
+      "title": "Masuk",
+      "subtitle": "Sesi login tersimpan sebagai cookie HttpOnly.",
+      "passwordPlaceholder": "password",
+      "submit": "Masuk",
+      "submitLoading": "Masuk..."
+    },
+    "register": {
+      "ariaLabel": "Daftar",
+      "title": "Daftar jadi Kreator",
+      "subtitle": "Satu akun, satu halaman publik untuk semua link kamu.",
+      "displayNamePlaceholder": "Nama tampil",
+      "bioPlaceholder": "Bio singkat (opsional)",
+      "passwordPlaceholder": "Password (min 8 karakter)",
+      "submit": "Buat Akun",
+      "submitLoading": "Mendaftar..."
+    }
+  },
+  "toast": {
+    "emailInvalid": "Email tidak valid.",
+    "emailCurrentPasswordRequired": "Masukkan password saat ini.",
+    "emailUpdated": "Email diperbarui.",
+    "passwordCurrentRequired": "Masukkan password sekarang.",
+    "newPasswordTooShort": "Password baru minimal 8 karakter.",
+    "passwordMismatch": "Password baru tidak sama.",
+    "passwordUpdated": "Password diperbarui. Device lain keluar otomatis.",
+    "allDevicesLoggedOut": "Semua device sudah logout.",
+    "accountDeleted": "Akun berhasil dihapus.",
+    "noLinksWithTag": "Tidak ada link dengan tag ini.",
+    "noLinksToDownload": "Belum ada link untuk diunduh.",
+    "tooManyLinksForQr": "Kebanyakan link ({count}): filter pakai tag dulu (maks 200).",
+    "qrDownloaded": "{count} QR diunduh."
+  },
+  "errors": {
+    "auth": {
+      "requestFailed": "Gagal"
+    },
+    "shorten": {
+      "createFailed": "Gagal membuat link: periksa URL lalu coba lagi."
+    },
+    "editLink": {
+      "saveFailed": "Gagal menyimpan"
+    },
+    "bulkImport": {
+      "importFailed": "Gagal mengimpor link: coba lagi.",
+      "reasonNotHttp": "harus http(s)",
+      "reasonNotUrl": "bukan URL valid",
+      "reasonDuplicate": "duplikat",
+      "nothingCreated": "Tidak ada link yang dibuat."
+    },
+    "copy": {
+      "failed": "Gagal"
+    },
+    "account": {
+      "requestFailed": "Permintaan gagal"
+    },
+    "dashboard": {
+      "loginRequired": "Masuk dulu lewat tombol Masuk di navbar untuk edit profil.",
+      "loadProfile": "Gagal memuat profil",
+      "loadKey": "Gagal memuat key",
+      "generateKey": "Gagal generate key",
+      "deleteKey": "Gagal hapus key",
+      "reorderFailed": "Gagal menyimpan: urutan dikembalikan.",
+      "changeReverted": "Gagal: perubahan dibatalkan.",
+      "qrZipFailed": "Gagal membuat ZIP QR.",
+      "uploadPhotoFailed": "Gagal upload foto",
+      "saveProfile": "Gagal menyimpan"
+    },
+    "analytics": {
+      "breakdownLoad": "Gagal memuat analitik",
+      "chartLoad": "Gagal memuat grafik"
+    },
+    "api": {
+      "unreachable": "Go API tidak terjangkau",
+      "invalidRequestBody": "Invalid request body",
+      "upstream": "Go API error"
+    },
+    "redirect": {
+      "notFoundTitle": "Link tidak ditemukan.",
+      "notFoundText": "Link ini belum ada atau mungkin salah ketik. Buka lagi halaman profil pemiliknya untuk cek daftar link.",
+      "expiredTitle": "Link sudah kadaluarsa.",
+      "expiredText": "Link ini sudah lewat masa berlakunya dan tidak bisa dibuka lagi.",
+      "serverTitle": "Sedang ada masalah. Coba lagi.",
+      "serverText": "Server Jejak sedang sibuk atau belum terhubung. Coba beberapa saat lagi, ya.",
+      "invalidCode": "Kode link tidak valid"
+    }
+  },
+  "notFound": {
+    "title": "Halaman ini tidak ada jejaknya.",
+    "subtitle": "Mungkin link-nya salah, atau sudah dipindah.",
+    "goHomeButton": "Balik ke Beranda",
+    "checkLinksButton": "Cek link kamu"
+  },
+  "terms": {
+    "title": "Syarat & Ketentuan",
+    "paragraph1": "Dengan menggunakan Jejak, kamu setuju untuk memakai layanan ini secara wajar: membuat link yang sah, tidak menyalahgunakan fitur shortener, dan tidak mengunggah konten yang melanggar hukum.",
+    "paragraph2": "Halaman ini masih placeholder: teks resmi Syarat & Ketentuan sedang disusun dan akan dipublikasikan di sini sebelum peluncuran resmi. Kalau ada pertanyaan, hubungi kami lewat halaman kontak.",
+    "lastUpdated": "Terakhir diperbarui: (belum berlaku).",
+    "backToHome": "Kembali ke Beranda"
+  },
+  "privacy": {
+    "title": "Kebijakan Privasi",
+    "paragraph1": "Kami hanya mengumpulkan data yang dibutuhkan untuk menjalankan Jejak: akun yang kamu daftarkan dan statistik kunjungan link kamu (klik, referrer, waktu) untuk analytics di dashboard.",
+    "paragraph2": "Halaman ini masih placeholder: kebijakan privasi lengkap: termasuk retensi data, cookie, dan hak kamu atas data: sedang disusun dan akan dipublikasikan di sini sebelum peluncuran resmi.",
+    "lastUpdated": "Terakhir diperbarui: (belum berlaku).",
+    "backToHome": "Kembali ke Beranda"
+  },
+  "contact": {
+    "title": "Kontak",
+    "paragraph1": "Ada pertanyaan, saran, atau laporan bug? Kami senang mendengar dari kreator yang memakai Jejak: baik itu soal link-in-bio, shortener, maupun analytics.",
+    "paragraph2": "Kirim email ke {email} dan kami balas secepatnya. Halaman ini masih placeholder: kanal kontak lain (form, sosial media) menyusul.",
+    "responseTime": "Kami biasanya membalas dalam 1-2 hari kerja.",
+    "backToHome": "Kembali ke Beranda"
+  },
+  "forms": {
+    "appPage": {
+      "badge": "Link-in-bio untuk kreator",
+      "headingLine1": "Satu halaman",
+      "headingLine2": "untuk semua link kamu.",
+      "subtitle": "Persingkat link di bawah: kalau kamu login, link otomatis masuk ke profil publikmu.",
+      "analyticsLink": "Lihat analytics →"
+    },
+    "shorten": {
+      "urlAriaLabel": "URL asli yang mau dipersingkat",
+      "urlPlaceholder": "https://contoh.com/link-kamu",
+      "loadingLabel": "Membuat link...",
+      "submitLabel": "Persingkat",
+      "slugAriaLabel": "Custom slug (opsional)",
+      "slugPlaceholder": "Custom slug (opsional, 3-30: huruf/angka/_/-)",
+      "tagAriaLabel": "Tag (opsional)",
+      "tagPlaceholder": "Tag (opsional, pisah koma: mis. youtube, promo)",
+      "expiryAriaLabel": "Aktif sampai (opsional)",
+      "helperText": "Opsional: link berhenti redirect (410) setelah waktu ini. Waktu ditampilkan sesuai zona lokalmu.",
+      "resultHint": "Klik untuk membuka redirect-nya."
+    },
+    "editLink": {
+      "dialogAriaLabel": "Edit link /{shortCode}",
+      "shortCode": "/{shortCode}",
+      "mainUrlLabel": "URL utama: {originalUrl}",
+      "iosLabel": "URL untuk iOS (opsional)",
+      "iosPlaceholder": "https://apps.apple.com/...",
+      "androidLabel": "URL untuk Android (opsional)",
+      "androidPlaceholder": "https://play.google.com/...",
+      "tagLabel": "Tag (koma, maks 5)",
+      "tagPlaceholder": "deeplink, promo",
+      "expiryLabel": "Aktif sampai (opsional)",
+      "clearExpiryTitle": "Hapus batas waktu (aktif selamanya)",
+      "expiryCurrent": "Sekarang: {formattedDate}",
+      "noExpiryHint": "Tanpa batas waktu: biarkan kosong untuk tetap aktif."
+    },
+    "bulkImport": {
+      "title": "Import banyak link",
+      "description": "Tempel 10-100 URL, satu per baris. Baris kosong diabaikan.",
+      "urlLabel": "URL (satu per baris)",
+      "urlPlaceholder": "https://contoh.com/1\nhttps://contoh.com/2\nhttps://contoh.com/3",
+      "totalLinesCount": "{totalLines} URL",
+      "maxWarning": ": maks 100",
+      "minWarning": ": minimal 10",
+      "validCount": "{validCount} valid",
+      "lineLabel": "baris {line}",
+      "tagLabel": "Tag untuk semua link hasil import (opsional)",
+      "tagPlaceholder": "promo, Oktober",
+      "loadingLabel": "Mengimpor...",
+      "submitLabel": "Import",
+      "submitLabelWithCount": "Import {validCount} link",
+      "resultSummary": "{created} link dibuat, {failed} gagal",
+      "done": "Selesai",
+      "failedRow": "baris {line}: {url}: {error}",
+      "openMyLinks": "Buka Link Saya",
+      "emptyResult": "Tidak ada link yang dibuat."
+    },
+    "qr": {
+      "dialogAriaLabel": "QR Code {shortCode}",
+      "shortCode": "/{shortCode}",
+      "copyUrlLabel": "Salin URL",
+      "downloadLabel": "Download PNG"
+    },
+    "share": {
+      "title": "Bagikan Halaman",
+      "description": "Salin tautan, simpan QR, atau buka profilmu.",
+      "urlAriaLabel": "Tautan halaman publik"
+    },
+    "confirm": {
+      "typingPrompt": "Ketik {requireTyping} untuk melanjutkan"
+    },
+    "profileLinks": {
+      "emptyTitle": "Belum ada link di sini.",
+      "emptyDescription": "Kreator ini belum menambahkan link. Cek lagi nanti.",
+      "featuredBadge": "★ Unggulan",
+      "trendingBadge": "Trending",
+      "shortCode": "/{shortCode}"
+    }
+  },
+  "common": {
+    "copy": "Salin",
+    "copied": "Tersalin",
+    "failed": "Gagal",
+    "cancel": "Batal",
+    "save": "Simpan",
+    "delete": "Hapus",
+    "confirm": "Konfirmasi",
+    "processing": "Memproses...",
+    "loading": "Memuat...",
+    "saving": "Menyimpan...",
+    "clearExpiry": "Hapus batas waktu",
+    "viewProfile": "Lihat Profil",
+    "downloadQr": "Unduh QR",
+    "themes": {
+      "classic": "Classic",
+      "darkroom": "Darkroom",
+      "coral": "Coral",
+      "glass": "Glass",
+      "risoPrint": "Riso Print",
+      "peach": "Peach",
+      "lavender": "Lavender",
+      "matcha": "Matcha",
+      "sakura": "Sakura",
+      "ocean": "Ocean",
+      "sunset": "Sunset"
+    }
+  },
+  "metadata": {
+    "title": "Jejak: Satu link, semua konten kamu",
+    "description": "Satu halaman untuk semua link kreator, lengkap dengan click analytics."
+  }
+}

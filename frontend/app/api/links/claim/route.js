@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 
 const GO_API_URL = process.env.GO_API_URL || "http://localhost:8081";
 
-// Proxy klaim -> Go POST /api/links/claim. Cookie sesi diteruskan
-// (Go menolak tanpa login + hanya mengklaim baris yang masih NULL).
+// Proxy claim -> Go POST /api/links/claim. The session cookie is forwarded
+// (Go rejects unauthenticated requests and only claims rows that are still NULL).
 export async function POST(req) {
   const cookie = req.headers.get("cookie") || "";
   let body;

@@ -9,7 +9,7 @@ import (
 	"jejak/internal/auth"
 )
 
-// TestHandleClaimLinksAnonymouslyBlocked: claim requires login — anonymous
+// TestHandleClaimLinksAnonymouslyBlocked: claim requires login: anonymous
 // request must be rejected before touching the store.
 func TestHandleClaimLinksAnonymouslyBlocked(t *testing.T) {
 	s := &fakeStore{}
@@ -233,7 +233,7 @@ func TestHandleUpdateLinkFeatured(t *testing.T) {
 	})
 }
 
-// TestHandleUpdateLinkIsActive covers the Fase 13 disable/enable toggle:
+// TestHandleUpdateLinkIsActive covers the Phase 13 disable/enable toggle:
 // {is_active} alone must reach SetLinkActive, must NOT touch UpdateLink
 // (rules/tags untouched), and must be 404 for links the caller doesn't own.
 func TestHandleUpdateLinkIsActive(t *testing.T) {

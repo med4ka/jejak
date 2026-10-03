@@ -8,7 +8,7 @@ import (
 )
 
 // newClaimMock returns a SingleStore wired to a mocked *sql.DB (no Postgres
-// needed). The SQL matcher REQUIRES the "AND creator_id IS NULL" guard — if a
+// needed). The SQL matcher REQUIRES the "AND creator_id IS NULL" guard: if a
 // future change drops the guard (making anywhere claimable), every ExpectExec
 // below fails, which is exactly the regression the security test is for.
 func newClaimMock(t *testing.T) (*SingleStore, sqlmock.Sqlmock) {
@@ -77,15 +77,15 @@ func TestClaimLinksNeverStealsOwnedRows(t *testing.T) {
 }
 
 // TestClaimLinksMixedBatch mirrors real traffic: the browser submits old codes
-// from localStorage — some still ownerless (claimed), some already owned by
-// this same user (re-claim attempt, harmless) — and claimed only counts x1.
+// from localStorage: some still ownerless (claimed), some already owned by
+// this same user (re-claim attempt, harmless): and claimed only counts x1.
 func TestClaimLinksMixedBatch(t *testing.T) {
 	store, mock := newClaimMock(t)
 
 	mock.ExpectBegin()
-	expectClaimUpdate(mock, 3, "fresh1", 1)    // NULL -> claimed
+	expectClaimUpdate(mock, 3, "fresh1", 1)      // NULL -> claimed
 	expectClaimUpdate(mock, 3, "alreadyours", 0) // already owned by user 3
-	expectClaimUpdate(mock, 3, "taken", 0)      // owned by someone else
+	expectClaimUpdate(mock, 3, "taken", 0)       // owned by someone else
 	mock.ExpectCommit()
 
 	claimed, err := store.ClaimLinks(3, []string{"fresh1", "alreadyours", "taken"})

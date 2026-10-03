@@ -1,4 +1,4 @@
--- ROLLBACK MANUAL ONLY (reversibel).
--- Hapus pilihan tema; semua akun kembali ke 'classic' (perilaku lama).
+-- MANUAL ROLLBACK ONLY (reversible).
+-- Removes the theme choice; every account returns to 'classic' (old behavior).
 
 ALTER TABLE creators DROP COLUMN IF EXISTS theme;

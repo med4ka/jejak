@@ -2,50 +2,105 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Camera } from "lucide-react";
+import { Camera, ExternalLink, Download } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { DndContext, closestCenter } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import QrModal from "../components/QrModal";
 import EditLinkModal from "../components/EditLinkModal";
-import ClicksChart from "../components/ClicksChart";
+import BulkImportModal from "../components/BulkImportModal";
 import ShortenForm from "../components/ShortenForm";
 import CopyButton from "../components/CopyButton";
+import SubmitButton from "../components/SubmitButton";
+import { useToast } from "../components/Toast";
+import RingkasanTab from "./RingkasanTab";
+import AnalyticsTab from "./AnalyticsTab";
+import PengaturanTab from "./PengaturanTab";
+import ShareModal, { ShareButton } from "../components/ShareModal";
 import { THEMES, themeStyles } from "../../lib/themes";
 import ThemeBackdrop from "../components/ThemeBackdrop";
+import { EASE, SPRING } from "../../lib/animations";
+import { shortPath, absoluteShortUrl } from "../../lib/shortlink";
+import { useTranslation } from "../../lib/I18nProvider";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081";
+// API_BASE (NEXT_PUBLIC_API_URL / http://localhost:8081) REMOVED: public
+// page redirect fix, 2026-09-30. Every short URL is built from the
+// same-origin /r/{code} path (lib/shortlink), so no backend host leaks into
+// the UI, the clipboard, or QR codes.
 
-// Baris link yang bisa di-drag. attributes+listeners ditempel di grip
-// (bukan seluruh baris) supaya tombol QR/salin/edit tetap bisa di-tap normal.
-// dragDisabled=true saat filter tag aktif (reorder parsial akan menabrak
-// position baris yang tersembunyi — lihat onDragEnd).
+// Draggable link row. attributes+listeners are attached to the grip handle
+// rather than the whole row so the QR/copy/edit buttons stay normally
+// tappable. dragDisabled=true while a tag filter is active (a partial
+// reorder would collide with the positions of hidden rows: see onDragEnd).
+// The hover lift (Apple detail #4: y -4px + shadow 4px → 6px) uses the
+// .link-lift CSS utility (globals.css), NOT framer-motion and NOT Tailwind
+// hover:* utilities: dnd-kit owns this row's style.transform through inline
+// styles, so if framer-motion also drove transform the drag and hover values
+// would collide on the same motion value. Inline styles are applied only
+// while dnd is active (transform non-null), keeping rows free of transform
+// at rest: the CSS lift can then run and every card starts from an
+// identical initial state. .link-lift is wrapped in @media (hover:hover) and
+// (pointer:fine): on touch devices :hover sticks after a tap, so the touched
+// card would stay permanently lifted and rows would look misaligned (the
+// "first card sits higher" bug). CSS cannot spring, hence the short 150ms
+// duration; the target values (-translate-y-1 = -4px, 6px shadow) still match
+// the specification. Expiry status badge above the slug (link management,
+// 2026-09-30): "Expired" is permanent (the redirect already answers 410);
+// "Ends in Xh" appears only for schedules within 24 hours (yellow warning):
+// beyond 24 hours the detail is available in the edit modal and the row does
+// not need a permanent badge. status/expires_at come from the backend
+// (scanLinks, UTC): the remaining time is computed locally, which is safe
+// because the comparison is absolute.
+function expiryBadge(link, st, t) {
+  if (link.status === "expired") {
+    return (
+      <span className="mt-1 inline-block rounded-full border border-flash-coral bg-flash-coral/10 px-2 py-px text-[11px] font-bold text-flash-coral">
+        {t("dashboard.links.row.badges.expired")}
+      </span>
+    );
+  }
+  if (link.status === "scheduled" && link.expires_at) {
+    const ms = new Date(link.expires_at).getTime() - Date.now();
+    if (ms > 0 && ms <= 24 * 60 * 60 * 1000) {
+      const h = Math.max(1, Math.ceil(ms / (60 * 60 * 1000)));
+      return (
+        <span className="mt-1 inline-block rounded-full border border-ink bg-flash-yellow px-2 py-px text-[11px] font-bold text-ink">
+          {t("dashboard.links.row.badges.endsIn", { hours: h })}
+        </span>
+      );
+    }
+  }
+  return null;
+}
+
 function SortableLinkRow({ link, onQr, onEdit, onFeature, onToggleActive, dragDisabled, st }) {
+  const { t } = useTranslation();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: link.short_code,
     disabled: dragDisabled,
   });
+  const dndActive = isDragging || transform != null;
   return (
     <div
       ref={setNodeRef}
-      style={{ transform: CSS.Translate.toString(transform), transition }}
-      className={`flex items-center justify-between gap-3 ${st.radius} ${st.borderW} ${st.border} ${st.card} px-4 py-2.5 transition-colors duration-150 hover:opacity-90 ${isDragging ? "opacity-60" : ""} ${!link.is_active ? "opacity-60" : ""}`}
+      style={dndActive ? { transform: CSS.Translate.toString(transform), transition } : undefined}
+      className={`flex items-center justify-between gap-3 ${st.radius} ${st.borderW} ${st.border} ${st.card} ${st.shadow} p-5 md:p-6 transition duration-150 link-lift ${isDragging ? "opacity-60" : ""} ${!link.is_active ? "opacity-60" : ""}`}
     >
       <span
         {...attributes}
         {...listeners}
-        title={dragDisabled ? "Reset filter untuk mengurutkan" : "Tarik untuk mengurutkan"}
+        title={dragDisabled ? t("dashboard.links.row.dragDisabledTitle") : t("dashboard.links.row.dragTitle")}
         className={`shrink-0 select-none font-mono text-sm ${st.textMuted} ${dragDisabled ? "cursor-not-allowed opacity-40" : "cursor-grab touch-none"}`}
       >
         ≡
       </span>
-      {/* Toggle unggulan — radio, bukan checkbox: hanya 1 link per akun bisa
-          aktif (server menurunkan yang lain dalam 1 transaksi). ★ saat
-          featured, ☆ saat tidak. */}
+      {/* Featured toggle: a radio control, not a checkbox: only one link per
+          account can be featured (the server demotes the others in a single
+          transaction). ★ when featured, ☆ otherwise. */}
       <button
         onClick={onFeature}
-        title={link.is_featured ? "Hapus unggulan" : "Jadikan unggulan"}
+        title={link.is_featured ? t("dashboard.links.row.unfeatureTitle") : t("dashboard.links.row.featureTitle")}
         aria-pressed={link.is_featured}
         className={`shrink-0 select-none text-lg leading-none transition-colors duration-150 ${link.is_featured ? st.text : st.textMuted}`}
       >
@@ -53,14 +108,15 @@ function SortableLinkRow({ link, onQr, onEdit, onFeature, onToggleActive, dragDi
       </button>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{link.original_url}</p>
+        {expiryBadge(link, st, t)}
         <p className={`font-mono text-xs ${st.textMuted}`}>
-          /{link.short_code} · {link.click_count} klik
+          {t("dashboard.links.row.meta", { shortCode: link.short_code, count: link.click_count })}
         </p>
         {(link.tags || []).length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1">
-            {(link.tags || []).map((t) => (
-              <span key={t} className={`rounded-full border ${st.border} px-2 py-px text-[11px] ${st.textMuted}`}>
-                {t}
+            {(link.tags || []).map((tag) => (
+              <span key={tag} className={`rounded-full border ${st.border} px-2 py-px text-[11px] ${st.textMuted}`}>
+                {tag}
               </span>
             ))}
           </div>
@@ -69,60 +125,87 @@ function SortableLinkRow({ link, onQr, onEdit, onFeature, onToggleActive, dragDi
       <div className="flex shrink-0 gap-1.5">
         <button
           onClick={onEdit}
-          title="Atur URL per-device & tag"
+          title={t("dashboard.links.row.editTooltip")}
           className={`shrink-0 rounded-full ${st.borderW} ${st.border} ${st.card} px-3 py-0.5 text-xs font-bold transition-colors duration-150 hover:opacity-90`}
         >
-          Edit
+          {t("dashboard.links.row.edit")}
         </button>
-        <CopyButton text={`${API_BASE}/r/${link.short_code}`} label="Salin" />
+        <CopyButton text={shortPath(link.short_code)} label={t("common.copy")} />
         <button
           onClick={onQr}
           className={`shrink-0 rounded-full ${st.borderW} ${st.border} ${st.card} px-3 py-0.5 text-xs font-bold transition-colors duration-150 hover:opacity-90`}
         >
-          QR
+          {t("dashboard.links.row.qr")}
         </button>
         <button
           onClick={onToggleActive}
-          title={link.is_active ? "Nonaktifkan link (redirect jadi 410, tetap tampil di dashboard)" : "Aktifkan kembali (redirect jalan lagi)"}
+          title={link.is_active ? t("dashboard.links.row.deactivateTooltip") : t("dashboard.links.row.activateTooltip")}
           aria-pressed={!!link.is_active}
           className={`shrink-0 rounded-full ${st.borderW} ${st.border} ${st.card} px-3 py-0.5 text-xs font-bold transition-colors duration-150 hover:opacity-90`}
         >
-          {link.is_active ? "Aktif" : "Nonaktif"}
+          {link.is_active ? t("dashboard.links.row.active") : t("dashboard.links.row.inactive")}
         </button>
       </div>
     </div>
   );
 }
 
-// Halaman dashboard kreator (login wajib): form edit profil
-// (display_name, bio, avatar_url, socials) — pola fetch sama seperti AuthModal:
-// JSON request/response, tanpa reload, prefill dari GET /api/profile.
+// Creator dashboard (login required): profile edit form
+// (display_name, bio, avatar_url, socials): the same fetch pattern as
+// AuthModal: JSON request/response, no reload, prefilled from GET
+// /api/profile.
 export default function DashboardClient() {
+  const { t } = useTranslation();
   const [username, setUsername] = useState(null);
   const [checked, setChecked] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [bio, setBio] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
-  // Avatar upload lokal: file yang dipilih user + preview object URL-nya.
-  // File tidak langsung dikirim — preview dulu, baru multipart saat submit.
+  // Local avatar upload: the file selected by the visitor plus its preview
+  // object URL. The file is not sent immediately: preview first, multipart
+  // upload on submit.
   const [avatarFile, setAvatarFile] = useState(null);
   const [avatarPreview, setAvatarPreview] = useState("");
-  // Overlay "Ganti foto" di atas avatar: tampil saat hover (desktop) / sentuh
-  // (mobile), dikontrol state supaya sinkron dengan framer-motion AnimatePresence.
+  // "Change photo" overlay above the avatar (aria-label "Ganti foto"): shown
+  // on hover (desktop) / touch (mobile), driven by state so it stays in sync
+  // with the framer-motion AnimatePresence.
   const [avatarHover, setAvatarHover] = useState(false);
-  // Input file tersembunyi dipicu via ref — avatar adalah tombol, bukan label.
+  // The hidden file input is triggered through a ref: the avatar is a
+  // button, not a label.
   const avatarInputRef = useRef(null);
   const [socials, setSocials] = useState([]);
   const [links, setLinks] = useState([]);
   const [qrCode, setQrCode] = useState(null);
   const [editing, setEditing] = useState(null);
+  // ShareModal for the public page: opened from two triggers (Ringkasan and
+  // Profil).
+  const [shareOpen, setShareOpen] = useState(false);
   const [orderMsg, setOrderMsg] = useState("");
-  const [tab, setTab] = useState("links");
+  // Default tab is "Ringkasan" (deliberately not in the URL: a refresh always
+  // returns here).
+  const [tab, setTab] = useState("ringkasan");
+  // Analytics tab range (deviation E, 2026-09-30): the state is held here
+  // rather than in AnalyticsTab so changing the range does not reset the
+  // other cards, and it can be tracked in the URL via history.replaceState:
+  // refreshes and shared links carry the same ?range=. The initial value is
+  // validated on mount (see useEffect); values outside 7d/30d/90d are
+  // ignored (the backend rejects them with 400).
+  const [range, setRange] = useState("30d");
+  // Bulk import modal (link management): opened from the "Link saya"
+  // toolbar.
+  const [bulkOpen, setBulkOpen] = useState(false);
+  // Cross-component toast (introduced with Account settings): used for QR
+  // ZIP download results and the 200-link limit without moving focus.
+  const toast = useToast();
+  // true after GET /api/profile succeeds: distinguishes "still loading" from
+  // "genuinely empty" for the Ringkasan stats skeletons.
+  const [profileReady, setProfileReady] = useState(false);
   const [tagFilter, setTagFilter] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  // API Keys (tab ke-3): list + key yang baru digenerate (hanya tampil sekali).
+  // API keys tab: the key list plus the freshly generated key (shown only
+  // once).
   const [apiKeys, setApiKeys] = useState([]);
   const [generatedKey, setGeneratedKey] = useState("");
   const [keyLabel, setKeyLabel] = useState("");
@@ -131,73 +214,139 @@ export default function DashboardClient() {
   const [keyErr, setKeyErr] = useState("");
   const [apiDocsOpen, setApiDocsOpen] = useState(false);
   const [theme, setTheme] = useState("classic");
-  // Fitur "Dashboard ikut tema kreator": body di-set ke tema aktif (sama
-  // teknik ProfileLinks di /u) — body[data-profile-theme=...] di globals.css
-  // men-swap background (darkroom/glass); classic/coral tanpa rule →
-  // body tetap print-white. Cleanup saat unmount.
-  useEffect(() => {
-    document.body.dataset.profileTheme = theme;
-    return () => {
-      delete document.body.dataset.profileTheme;
-    };
-  }, [theme]);
+  // THEME SCOPE (decision 2026-09-29): the dashboard does NOT follow the
+  // creator's theme: body[data-profile-theme] is NOT applied here (only
+  // ProfileLinks on /u/[username] may set it), so the dashboard always renders
+  // in the Instant Print style. `theme` is retained ONLY for (1) the Profile
+  // preset picker and (2) the PUT /api/profile payload. Styling keeps using
+  // the classic preset.
+  const st = themeStyles("classic");
+  const inputThemed = `w-full ${st.radius} ${st.borderW} ${st.border} ${st.card} px-3 py-2 text-sm ${st.placeholder} focus:border-flash-yellow focus:ring-2 focus:ring-flash-yellow/30 focus:outline-none transition-all duration-150`;
+  const welcomeStep1 = t("dashboard.links.welcome.step1").split("{action}");
+  const welcomeStep2 = t("dashboard.links.welcome.step2").split("{action}");
 
-  const st = themeStyles(theme);
-  const inputThemed = `w-full ${st.radius} ${st.borderW} ${st.border} ${st.card} px-3 py-2 text-sm ${st.placeholder} focus:outline-none`;
+  // Single entry point for opening ShareModal (two triggers: Ringkasan and
+  // Profil): also marks onboarding step 3 (localStorage jejak_shared) on the
+  // first share.
+  function openShare() {
+    localStorage.setItem("jejak_shared", "true");
+    setShareOpen(true);
+  }
 
-  useEffect(() => {
-    const u = localStorage.getItem("jejak_username");
-    setUsername(u);
-    setChecked(true);
-    if (!u) {
-      return;
+  // Change the analytics range: state + URL (deviation E). replaceState, NOT
+  // router.push: the URL changes without a Next navigation, so other tabs
+  // and their data are not remounted and the back button is not filled with
+  // an entry for every pill click.
+  function changeRange(next) {
+    setRange(next);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set("range", next);
+      window.history.replaceState(null, "", url);
+    } catch {
+      // The URL could not be read (sandboxed or old browser): the range still
+      // works through state: the URL exists only for refresh/share purposes.
     }
-    loadProfile();
-    fetch("/api/keys", { cache: "no-store" })
-      .then(async (res) => { const t = await res.text(); try { const d = JSON.parse(t); if (res.ok && Array.isArray(d)) setApiKeys(d); } catch {} })
-      .catch(() => {});
+  }
+
+  useEffect(() => {
+    // Range from the URL (deviation E): ?range=7d|30d|90d is applied on
+    // mount; other values are ignored so a malformed URL can never trigger a
+    // backend 400.
+    const r = new URLSearchParams(window.location.search).get("range");
+    if (r === "7d" || r === "30d" || r === "90d") {
+      setRange(r);
+    }
+
+    // Dashboard authentication is the jejak_session COOKIE, NOT
+    // localStorage. localStorage.jejak_username can disappear (cleared,
+    // different port, different browser) while the session is still valid:
+    // that was the source of the false "log in first" message shown even
+    // though the navbar (cookieStore) and /api/profile both reported an
+    // authenticated session. Single source of truth for BOTH the navbar and
+    // the dashboard: GET /api/profile (401 = not logged in, 200 = logged in).
+    loadProfile().then((authed) => {
+      // API keys are loaded only when the session is valid: that endpoint
+      // also answers 401 for anonymous visitors, so calling it earlier is
+      // pointless (wasted work and noisy 401s in the logs).
+      if (!authed) return;
+      fetch("/api/keys", { cache: "no-store" })
+        .then(async (res) => { const raw = await res.text(); try { const d = JSON.parse(raw); if (res.ok && Array.isArray(d)) setApiKeys(d); } catch {} })
+        .catch(() => {});
+    });
   }, []);
 
-  // Muat profil + links dari GET /api/profile. Dipakai saat pertama buka DAN
-  // setelah edit link (supaya baris yang diedit langsung tampil dengan
-  // device_rules/tags terbaru tanpa reload halaman).
+  // Load profile + links from GET /api/profile. Used on first open AND after
+  // editing a link (so the edited row immediately shows the latest
+  // device_rules/tags without a page reload). Since the false "log in first"
+  // fix, this function is ALSO the page's auth gate: the session is read from
+  // the cookie (credentials "include"), not localStorage. Returns
+  // Promise<boolean>: true = valid session (the mount effect uses it to
+  // decide whether to load the API keys as well).
   function loadProfile() {
-    fetch("/api/profile")
+    return fetch("/api/profile", { cache: "no-store", credentials: "include" })
       .then(async (res) => {
+        // 401 = no cookie / expired session → show the "Masuk dulu"
+        // ("log in first") message. checked is set HERE rather than at the
+        // start of mount so the first frame is always the "Memuat..."
+        // skeleton: no false "Masuk dulu" flash while the response is still
+        // in flight.
+        if (res.status === 401) {
+          setUsername(null);
+          setProfileReady(false);
+          setChecked(true);
+          return false;
+        }
         const text = await res.text();
         let data = {};
         try {
           data = JSON.parse(text);
         } catch {
-          throw new Error(text || "Gagal memuat profil");
+          throw new Error(text || t("errors.dashboard.loadProfile"));
         }
         if (!res.ok) {
-          throw new Error(data.error || "Gagal memuat profil");
+          throw new Error(data.error || t("errors.dashboard.loadProfile"));
         }
+        // The username comes from the profile response: the same source the
+        // navbar displays (both read /api/profile over the cookie session).
+        setUsername(data.username || null);
         setDisplayName(data.display_name || "");
         setBio(data.bio || "");
         setAvatarUrl(data.avatar_url || "");
         setSocials(Array.isArray(data.socials) ? data.socials : []);
         setLinks(Array.isArray(data.links) ? data.links : []);
         setTheme(THEMES.includes(data.theme) ? data.theme : "classic");
+        setProfileReady(true);
+        setError("");
+        setChecked(true);
+        return true;
       })
-      .catch((err) => setError(err.message));
+      .catch((err) => {
+        // A failed server call does NOT imply a missing session (network
+        // outage / 500). The page still renders and the error message is
+        // shown in the !username branch rather than an accusation that the
+        // visitor is logged out.
+        setError(err.message);
+        setChecked(true);
+        return false;
+      });
   }
 
   function updateSocial(i, field, value) {
     setSocials((prev) => prev.map((s, idx) => (idx === i ? { ...s, [field]: value } : s)));
   }
 
-  // Objek URL dari createObjectURL harus di-revoke pas preview ganti atau
-  // komponen unmount, kalau tidak bocor memory (browser pin file-nya).
+  // Object URLs from createObjectURL must be revoked when the preview
+  // changes or the component unmounts, otherwise memory leaks (the browser
+  // keeps the file pinned).
   useEffect(() => () => {
     if (avatarPreview) URL.revokeObjectURL(avatarPreview);
   }, [avatarPreview]);
 
-  // Pilih file dari avatar interaktif -> tampilkan preview lokal dulu.
-  // e.target.value direset supaya memilih file yang sama lagi tetap memicu
-  // onChange (file input browser tidak menembak event keduanya kalau value
-  // tidak di-reset ke "").
+  // Pick a file through the interactive avatar → show a local preview first.
+  // e.target.value is reset so selecting the same file again still fires
+  // onChange (a browser file input does not fire the event a second time
+  // unless its value is reset to "").
   function handleAvatarFile(e) {
     const f = e.target.files && e.target.files[0];
     e.target.value = "";
@@ -210,7 +359,7 @@ export default function DashboardClient() {
     setSocials((prev) => prev.filter((_, idx) => idx !== i));
   }
 
-  // API keys dimuat saat tab-nya dibuka (lazy, bukan saat mount profil).
+  // API keys load when their tab is opened (lazy, not at profile mount).
   useEffect(() => {
     if (tab === "api-keys") {
       loadKeys();
@@ -225,17 +374,17 @@ export default function DashboardClient() {
         try {
           data = JSON.parse(text);
         } catch {
-          throw new Error(text || "Gagal memuat key");
+          throw new Error(text || t("errors.dashboard.loadKey"));
         }
         if (!res.ok) {
-          throw new Error(data.error || "Gagal memuat key");
+          throw new Error(data.error || t("errors.dashboard.loadKey"));
         }
         setApiKeys(Array.isArray(data) ? data : []);
       })
       .catch((err) => setKeyErr(err.message));
   }
 
-  // Generate key baru: plaintext hanya tampil SEKALI di response ini.
+  // Generate a new key: the plaintext appears only ONCE, in this response.
   async function handleGenerateKey(e) {
     e.preventDefault();
     setKeyErr("");
@@ -253,14 +402,14 @@ export default function DashboardClient() {
       try {
         data = JSON.parse(text);
       } catch {
-        throw new Error(text || "Gagal generate key");
+        throw new Error(text || t("errors.dashboard.generateKey"));
       }
       if (!res.ok) {
-        throw new Error(data.error || "Gagal generate key");
+        throw new Error(data.error || t("errors.dashboard.generateKey"));
       }
       setGeneratedKey(data.key);
       setKeyLabel("");
-      setKeyMsg("Key berhasil dibuat. Salin sekarang — tidak akan ditampilkan lagi.");
+      setKeyMsg(t("dashboard.settings.apiKeys.createdNotice"));
       loadKeys();
     } catch (err) {
       setKeyErr(err.message);
@@ -270,7 +419,7 @@ export default function DashboardClient() {
   }
 
   async function handleDeleteKey(id) {
-    if (!window.confirm("Hapus API key ini? Integrasi yang memakainya akan berhenti bekerja.")) {
+    if (!window.confirm(t("dashboard.settings.apiKeys.deleteConfirm"))) {
       return;
     }
     setKeyErr("");
@@ -282,12 +431,12 @@ export default function DashboardClient() {
       try {
         data = JSON.parse(text);
       } catch {
-        throw new Error(text || "Gagal hapus key");
+        throw new Error(text || t("errors.dashboard.deleteKey"));
       }
       if (!res.ok) {
-        throw new Error(data.error || "Gagal hapus key");
+        throw new Error(data.error || t("errors.dashboard.deleteKey"));
       }
-      setKeyMsg("Key dihapus.");
+      setKeyMsg(t("dashboard.settings.apiKeys.deletedNotice"));
       loadKeys();
     } catch (err) {
       setKeyErr(err.message);
@@ -296,20 +445,21 @@ export default function DashboardClient() {
 
   function fmtDate(ts) {
     if (!ts) {
-      return "—";
+      return ": ";
     }
     const d = new Date(ts);
     if (Number.isNaN(d.getTime())) {
-      return "—";
+      return ": ";
     }
     return d.toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" });
   }
 
-  // Urutan baru langsung dioptimistic-update di UI, lalu disimpan via
-  // PUT /api/links/reorder (server tulis 1 transaction). Gagal simpan →
-  // UI dikembalikan ke urutan semula supaya tidak menipu.
-  // Filter client-side (list sudah dimuat penuh — tidak perlu endpoint baru
-  // untuk skala ini). Tag unik diturunkan dari data, bukan config statis.
+  // A new order is applied optimistically in the UI first, then persisted via
+  // PUT /api/links/reorder (the server writes in one transaction). If the
+  // save fails → the UI reverts to the previous order so it never misleads.
+  // Filtering is client-side (the full list is already loaded: no extra
+  // endpoint is warranted at this scale). Unique tags are derived from the
+  // data, not from static configuration.
   const allTags = [...new Set(links.flatMap((l) => l.tags || []))].sort();
   const visibleLinks = tagFilter === "" ? links : links.filter((l) => (l.tags || []).includes(tagFilter));
 
@@ -323,7 +473,7 @@ export default function DashboardClient() {
     const newIndex = prev.findIndex((l) => l.short_code === over.id);
     const next = arrayMove(prev, oldIndex, newIndex);
     setLinks(next);
-    setOrderMsg("Menyimpan urutan...");
+    setOrderMsg(t("dashboard.links.order.savingOrder"));
     try {
       const res = await fetch("/api/links/reorder", {
         method: "PUT",
@@ -331,18 +481,19 @@ export default function DashboardClient() {
         body: JSON.stringify({ order: next.map((l) => l.short_code) }),
       });
       if (!res.ok) {
-        throw new Error("Gagal menyimpan urutan");
+        throw new Error(t("errors.dashboard.reorderFailed"));
       }
-      setOrderMsg("Urutan tersimpan.");
+      setOrderMsg(t("dashboard.links.order.orderSaved"));
     } catch {
       setLinks(prev);
-      setOrderMsg("Gagal menyimpan — urutan dikembalikan.");
+      setOrderMsg(t("dashboard.links.order.orderFailed"));
     }
   }
 
-  // Toggle unggulan via PUT /api/links/{short_code} {is_featured: bool} —
-  // mirror onDragEnd: optimistic dulu biar responsif, kalau persist gagal
-  // state di-reload dari server (bukan tebak-tebakan revert lokal).
+  // Featured toggle via PUT /api/links/{short_code} {is_featured: bool}:
+  // mirrors onDragEnd: update optimistically for responsiveness; if the
+  // persist fails, state is reloaded from the server rather than guessed
+  // back with a local revert.
   async function toggleFeature(link) {
     const featured = !link.is_featured;
     setLinks((prev) =>
@@ -354,7 +505,7 @@ export default function DashboardClient() {
             : x
       )
     );
-    setOrderMsg(featured ? "Menyimpan unggulan..." : "Menghapus unggulan...");
+    setOrderMsg(featured ? t("dashboard.links.order.savingFeature") : t("dashboard.links.order.removingFeature"));
     try {
       const res = await fetch(`/api/links/${link.short_code}`, {
         method: "PUT",
@@ -362,19 +513,20 @@ export default function DashboardClient() {
         body: JSON.stringify({ is_featured: featured }),
       });
       if (!res.ok) {
-        throw new Error("Gagal menyimpan unggulan");
+        throw new Error(t("errors.dashboard.changeReverted"));
       }
-      setOrderMsg(featured ? "Unggulan disimpan." : "Unggulan dihapus.");
+      setOrderMsg(featured ? t("dashboard.links.order.featureSaved") : t("dashboard.links.order.featureRemoved"));
     } catch {
       loadProfile();
-      setOrderMsg("Gagal — perubahan dibatalkan.");
+      setOrderMsg(t("dashboard.links.order.failed"));
     }
   }
 
-  // Toggle aktif/nonaktif via PUT /api/links/{short_code} {is_active: bool}.
-  // Mirip toggleFeature: optimistic dulu, reload state server kalau gagal.
-  // Link nonaktif tetap tampil di dashboard (pemilik harus bisa menyalakan
-  // lagi) tapi URL publiknya berhenti redirect (410) — lihat HandleRedirect.
+  // Active/inactive toggle via PUT /api/links/{short_code} {is_active: bool}.
+  // Like toggleFeature: update optimistically first, reload server state on
+  // failure. A disabled link still appears in the dashboard (the owner must
+  // be able to re-enable it) but its public URL stops redirecting (410): see
+  // HandleRedirect.
   async function toggleActive(link) {
     const active = !link.is_active;
     setLinks((prev) =>
@@ -382,7 +534,7 @@ export default function DashboardClient() {
         x.short_code === link.short_code ? { ...x, is_active: active } : x
       )
     );
-    setOrderMsg("Menyimpan status...");
+    setOrderMsg(t("dashboard.links.order.savingStatus"));
     try {
       const res = await fetch(`/api/links/${link.short_code}`, {
         method: "PUT",
@@ -390,13 +542,63 @@ export default function DashboardClient() {
         body: JSON.stringify({ is_active: active }),
       });
       if (!res.ok) {
-        throw new Error("Gagal mengubah status");
+        throw new Error(t("errors.dashboard.changeReverted"));
       }
-      setOrderMsg(active ? "Link aktif kembali." : "Link dinonaktifkan.");
+      setOrderMsg(active ? t("dashboard.links.order.statusActive") : t("dashboard.links.order.statusInactive"));
     } catch {
       loadProfile();
-      setOrderMsg("Gagal — perubahan dibatalkan.");
+      setOrderMsg(t("dashboard.links.order.failed"));
     }
+  }
+
+  // Download every QR code as a single ZIP (link management): fetch → blob →
+  // save, NOT window.location: so a 400 (0 matches / >200 / 401) can be
+  // reported through a toast instead of navigating the browser to a JSON
+  // error page.
+  async function downloadAllQr() {
+    const target = tagFilter ? visibleLinks : links;
+    if (target.length === 0) {
+      toast.error(tagFilter ? t("toast.noLinksWithTag") : t("toast.noLinksToDownload"));
+      return;
+    }
+    if (target.length > 200) {
+      toast.error(t("toast.tooManyLinksForQr", { count: target.length }));
+      return;
+    }
+    try {
+      const q = tagFilter ? `?tag=${encodeURIComponent(tagFilter)}` : "";
+      const res = await fetch(`/api/links/qr-bulk${q}`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || t("errors.dashboard.qrZipFailed"));
+      }
+      const blob = await res.blob();
+      const cd = res.headers.get("Content-Disposition") || "";
+      const m = cd.match(/filename="([^"]+)"/);
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = m ? m[1] : "jejak-qr.zip";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+      toast.success(t("toast.qrDownloaded", { count: target.length }));
+    } catch (err) {
+      toast.error(err.message);
+    }
+  }
+
+  function openBulk() {
+    setBulkOpen(true);
+  }
+
+  // After an import completes: refresh the list (latest badges and click
+  // counts) and close the modal: the "Buka Link Saya" button in
+  // BulkImportModal calls this.
+  function onBulkImported() {
+    loadProfile();
+    setTab("links");
+    setBulkOpen(false);
   }
 
   async function onSubmit(e) {
@@ -406,10 +608,10 @@ export default function DashboardClient() {
     setLoading(true);
     try {
       let finalAvatar = avatarUrl;
-      // Jika ada file lokal yang dipilih, upload dulu (multipart) ke
-      // POST /api/profile/avatar; response-nya berisi path localStorage
-      // yang menjadi avatar_url final. URL manual di-overwrite oleh file
-      // ini — file menang, karena itu pilihan aktif user.
+      // If a local file was selected, upload it first (multipart) to
+      // POST /api/profile/avatar; the response contains the stored path that
+      // becomes the final avatar_url. A manually entered URL is overwritten
+      // by this file: the file wins because it is the active selection.
       if (avatarFile) {
         const fd = new FormData();
         fd.append("avatar", avatarFile);
@@ -419,10 +621,10 @@ export default function DashboardClient() {
         try {
           upData = JSON.parse(upText);
         } catch {
-          throw new Error(upText || "Gagal upload foto");
+          throw new Error(upText || t("errors.dashboard.uploadPhotoFailed"));
         }
         if (!up.ok) {
-          throw new Error(upData.error || upText || "Gagal upload foto");
+          throw new Error(upData.error || upText || t("errors.dashboard.uploadPhotoFailed"));
         }
         finalAvatar = upData.avatar_url;
         setAvatarUrl(finalAvatar);
@@ -440,16 +642,17 @@ export default function DashboardClient() {
       try {
         data = JSON.parse(text);
       } catch {
-        throw new Error(text || "Gagal menyimpan");
+        throw new Error(text || t("errors.dashboard.saveProfile"));
       }
       if (!res.ok) {
-        throw new Error(data.error || text || "Gagal menyimpan");
+        throw new Error(data.error || text || t("errors.dashboard.saveProfile"));
       }
-      setNotice("Profil tersimpan.");
-      // Navbar memakai state profile-nya SENDIRI yang hanya di-refresh saat
-      // navigasi (pathname/username). Setelah save di dashboard, pathname tidak
-      // berubah → navbar akan pakai theme LAMA (stall). Broadcast event supaya
-      // navbar re-fetch profil tanpa navigasi (lihat Navbar.jsx listener).
+      setNotice(t("dashboard.settings.profile.savedNotice"));
+      // The navbar holds its OWN profile state (avatar/name) that is only
+      // refreshed on navigation (pathname/username). After a save on the
+      // dashboard the pathname does not change, so the navbar would keep
+      // showing stale data. An event is broadcast so the navbar re-fetches
+      // the profile without navigation (see the NavbarClient listener).
       window.dispatchEvent(new Event("jejak:profile-updated"));
     } catch (err) {
       setError(err.message);
@@ -458,20 +661,34 @@ export default function DashboardClient() {
     }
   }
 
+  // Loading frame: a skeleton, NOT "Masuk dulu". The logged-in decision may
+  // only be made after /api/profile answers (401 → the next branch).
   if (!checked) {
     return (
-      <main>
-        <p className="text-sm text-muted">Memuat...</p>
+      <main className={st.text}>
+        <h1 className={`${st.headingFont} text-2xl font-bold`}>{t("dashboard.heading")}</h1>
+        <div className="mt-6 space-y-4" aria-busy="true" aria-label={t("dashboard.loading.dashboardLabel")}>
+          <div className={`${st.radiusLarge} ${st.borderW} ${st.border} ${st.card} h-24 w-full opacity-60`} />
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div className={`${st.radiusLarge} ${st.borderW} ${st.border} ${st.card} h-24 opacity-60`} />
+            <div className={`${st.radiusLarge} ${st.borderW} ${st.border} ${st.card} h-24 opacity-60`} />
+            <div className={`${st.radiusLarge} ${st.borderW} ${st.border} ${st.card} h-24 opacity-60`} />
+          </div>
+          <p className="text-sm text-muted">{t("dashboard.loading.general")}</p>
+        </div>
       </main>
     );
   }
 
+  // No username in state = /api/profile answered 401 (missing cookie /
+  // expired session). If the failure has another cause (network, 500), that
+  // message is displayed instead of claiming the visitor never logged in.
   if (!username) {
     return (
       <main>
-<h1 className="text-center font-display text-2xl font-bold">Dashboard</h1>
+<h1 className="text-center font-display text-2xl font-bold">{t("dashboard.heading")}</h1>
         <p className="mt-2 text-sm text-muted">
-          Masuk dulu lewat tombol Masuk di navbar untuk edit profil.
+          {error !== "" ? error : t("dashboard.notLoggedIn")}
         </p>
       </main>
     );
@@ -479,65 +696,99 @@ export default function DashboardClient() {
 
   return (
     <main className={st.text}>
-      <ThemeBackdrop theme={theme} />
-      <h1 className={`${st.headingFont} text-2xl font-bold`}>Dashboard</h1>
+      <ThemeBackdrop />
+      <div className="space-y-6 md:space-y-8">
+        <h1 className={`${st.headingFont} text-2xl font-bold`}>{t("dashboard.heading")}</h1>
 
-      <div className={`relative mt-4 grid grid-cols-3 ${st.radiusFull} ${st.borderW} ${st.border} ${st.card} p-1`}>
+      {/* Tab bar pills stay on a single row: horizontal scrolling on mobile
+          instead of wrapping, so the bar never grows in height. */}
+      <div className="mb-6 md:mb-8 flex overflow-x-auto rounded-full border-2 border-ink bg-white p-1">
         {[
-          { id: "links", label: "Link Saya" },
-          { id: "profil", label: "Profil" },
-          { id: "api-keys", label: "API Keys" },
-        ].map((t) => (
+          { id: "ringkasan", label: t("dashboard.tabs.ringkasan") },
+          { id: "links", label: t("dashboard.tabs.linkSaya") },
+          { id: "analytics", label: t("dashboard.tabs.analytics") },
+          { id: "profil", label: t("dashboard.tabs.profile") },
+          { id: "api-keys", label: t("dashboard.tabs.apiKeys") },
+          { id: "pengaturan", label: t("dashboard.tabs.settings") },
+        ].map((tabItem) => (
           <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`relative rounded-full px-4 py-2 text-sm font-bold ${
-              tab === t.id ? "text-ink" : st.textMuted
+            key={tabItem.id}
+            onClick={() => setTab(tabItem.id)}
+            aria-current={tab === tabItem.id ? "page" : undefined}
+            className={`relative shrink-0 whitespace-nowrap rounded-full px-4 py-2 text-sm transition-colors duration-150 ease-out ${
+              tab === tabItem.id ? "bg-flash-yellow font-bold text-ink" : "text-ink/60 hover:text-ink"
             }`}
           >
-            {tab === t.id && (
-                <motion.span
-                  layoutId="dashboard-tab"
-                  transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                  className={`absolute inset-0 rounded-full ${st.accent}`}
-                />
-            )}
-            <span className="relative">{t.label}</span>
+            {tabItem.label}
           </button>
         ))}
       </div>
 
-      <motion.div
-        key={tab}
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.2, ease: "easeOut" }}
-      >
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={tab}
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2, ease: EASE }}
+          className="space-y-4"
+        >
+      {tab === "ringkasan" && (
+        <RingkasanTab
+          displayName={displayName}
+          links={links}
+          profileReady={profileReady}
+          onShare={openShare}
+          onGoProfil={() => setTab("profil")}
+        />
+      )}
+      {tab === "analytics" && (
+        <AnalyticsTab st={st} range={range} onRange={changeRange} />
+      )}
       {tab === "profil" && (
       <>
-      <p className={`mt-4 text-sm ${st.text}`}>
-        Halaman publikmu:{" "}
-        <Link href={`/u/${username}`} className="font-medium text-flash-coral underline transition-opacity duration-150 hover:opacity-70">
-          /u/{username}
-        </Link>
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className={`text-sm ${st.text}`}>
+          {t("dashboard.settings.profile.publicPageLabel")}{" "}
+          <Link href={`/u/${username}`} className="font-medium text-flash-coral underline transition-opacity duration-150 hover:opacity-70">
+            /u/{username}
+          </Link>
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href={`/u/${username}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-full border-2 border-ink bg-white px-3 py-1.5 text-xs font-bold text-ink transition-transform duration-150 hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-flash-yellow"
+          >
+            <ExternalLink size={14} aria-hidden="true" />
+            {t("dashboard.settings.profile.viewProfile")}
+          </a>
+          <ShareButton onClick={openShare} />
+        </div>
+      </div>
 
-      <form onSubmit={onSubmit} className="mt-4 flex flex-col gap-3">
+      <form onSubmit={onSubmit} className="flex flex-col gap-4">
         <label className="text-sm font-medium">
-          Nama tampil
+          {t("dashboard.settings.profile.displayNameLabel")}
           <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} required maxLength={100} className={`${inputThemed} mt-1`} />
         </label>
         <label className="text-sm font-medium">
-          Bio (maks 500)
+          {t("dashboard.settings.profile.bioLabel")}
           <textarea value={bio} onChange={(e) => setBio(e.target.value)} maxLength={500} rows={3} className={`${inputThemed} mt-1`} />
         </label>
         <div>
-          <p className="text-sm font-medium">Avatar</p>
-          {/* Avatar = 1 elemen interaktif: foto/inisial sebagai dasar, overlay
-              gelap "Ganti foto" muncul role hover (desktop) / sentuh (mobile).
-              Klik di mana pun pada elemen memicu input file tersembunyi.
-              File divalidasi server (magic bytes, jpg/png/webp, maks 2MB);
-              preview client hanya untuk UX, keamanan selalu di server. */}
+          <label htmlFor="avatar" className="block text-sm font-medium">
+            {t("dashboard.settings.profile.avatarLabel")}
+          </label>
+          {/* The avatar is one interactive element: photo/initial as the base,
+              with a dark "Ganti foto" overlay on hover (desktop) / touch
+              (mobile); clicking anywhere on it triggers the hidden file
+              input (id="avatar" matches the label above the circle).
+              Empty state = 96x96 circle with a dashed ink border so the
+              placeholder never competes with the label. Files are validated
+              server-side (magic bytes, jpg/png/webp, 2MB max); the client
+              preview is for UX only, security always lives on the server. */}
           <div className="mt-2 flex items-center gap-3">
             <button
               type="button"
@@ -547,15 +798,19 @@ export default function DashboardClient() {
               onFocus={() => setAvatarHover(true)}
               onBlur={() => setAvatarHover(false)}
               onTouchStart={() => setAvatarHover(true)}
-              aria-label="Ganti foto"
-              title="Ganti foto"
-              className={`relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full ${st.borderW} ${st.border} ${st.card} focus:outline-none focus-visible:ring-2 focus-visible:ring-flash-coral`}
+              aria-label={t("dashboard.settings.profile.avatarChange")}
+              title={t("dashboard.settings.profile.avatarChange")}
+              className={`relative flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-flash-coral ${
+                avatarPreview !== "" || avatarUrl.trim() !== ""
+                  ? `${st.borderW} ${st.border} ${st.card}`
+                  : "border-2 border-dashed border-ink"
+              }`}
             >
               {avatarPreview !== "" || avatarUrl.trim() !== "" ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={avatarPreview || avatarUrl}
-                  alt="Avatar"
+                  alt={t("dashboard.settings.profile.avatarAlt")}
                   className="h-full w-full object-cover"
                 />
               ) : (
@@ -569,33 +824,34 @@ export default function DashboardClient() {
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
-                    transition={{ duration: 0.15, ease: "easeOut" }}
+                    transition={SPRING}
                     className="absolute inset-0 flex flex-col items-center justify-center gap-0.5 bg-ink/60 text-print-white"
                   >
                     <Camera className="h-5 w-5" aria-hidden="true" />
-                    <span className="text-[10px] font-bold">Ganti foto</span>
+                    <span className="text-[10px] font-bold">{t("dashboard.settings.profile.avatarChange")}</span>
                   </motion.span>
                 )}
               </AnimatePresence>
             </button>
-            <input ref={avatarInputRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={handleAvatarFile} className="hidden" />
-            {avatarFile && <p className="text-xs text-muted">Foto baru — akan diunggah saat Simpan Profil.</p>}
+            <input ref={avatarInputRef} id="avatar" type="file" accept="image/jpeg,image/png,image/webp" onChange={handleAvatarFile} className="hidden" />
+            {avatarFile && <p className="text-xs text-muted">{t("dashboard.settings.profile.avatarFileHint")}</p>}
           </div>
-          {/* Opsi URL manual tetap dipertahankan sebagai alternatif terpisah. */}
+          {/* The manual URL option is deliberately kept as a separate
+              alternative. */}
           <label className={`mt-2 block text-xs font-medium ${st.textMuted}`}>
-            ... atau URL avatar langsung (kosongkan = tanpa avatar)
-            <input value={avatarUrl} onChange={(e) => setAvatarUrl(e.target.value)} placeholder="https://..." className={`${inputThemed} mt-1`} />
+            {t("dashboard.settings.profile.avatarUrlLabel")}
+            <input value={avatarUrl} onChange={(e) => setAvatarUrl(e.target.value)} placeholder={t("dashboard.settings.profile.avatarUrlPlaceholder")} className={`${inputThemed} mt-1`} />
           </label>
         </div>
 
         <div className="mt-2">
-          <p className="text-sm font-medium">Sosial (maks 10)</p>
+          <p className="text-sm font-medium">{t("dashboard.settings.profile.socialsLabel")}</p>
           <div className="mt-2 flex flex-col gap-2">
             {socials.map((s, i) => (
               <div key={i} className="flex gap-2">
-                <input value={s.platform} onChange={(e) => updateSocial(i, "platform", e.target.value)} placeholder="Platform (mis. IG)" maxLength={30} className={`${inputThemed}`} />
-                <input value={s.url} onChange={(e) => updateSocial(i, "url", e.target.value)} placeholder="https://..." className={`${inputThemed}`} />
-                <button type="button" onClick={() => removeSocial(i)} aria-label="Hapus" className={`w-9 shrink-0 rounded-full ${st.borderW} ${st.border} ${st.card} px-0 text-sm font-bold`}>
+                <input value={s.platform} onChange={(e) => updateSocial(i, "platform", e.target.value)} placeholder={t("dashboard.settings.profile.socialPlatformPlaceholder")} maxLength={30} className={`${inputThemed}`} />
+                <input value={s.url} onChange={(e) => updateSocial(i, "url", e.target.value)} placeholder={t("dashboard.settings.profile.socialUrlPlaceholder")} className={`${inputThemed}`} />
+                <button type="button" onClick={() => removeSocial(i)} aria-label={t("dashboard.settings.profile.removeSocialAria")} className={`w-9 shrink-0 rounded-full ${st.borderW} ${st.border} ${st.card} px-0 text-sm font-bold`}>
                   ×
                 </button>
               </div>
@@ -607,37 +863,52 @@ export default function DashboardClient() {
               onClick={() => setSocials((prev) => [...prev, { platform: "", url: "" }])}
               className={`mt-2 rounded-full ${st.borderW} ${st.border} ${st.card} px-4 py-1.5 text-sm font-medium`}
             >
-              + Tambah sosial
+              {t("dashboard.settings.profile.addSocial")}
             </button>
           )}
         </div>
 
         <div className="mt-2">
-          <p className="text-sm font-medium">Tema halaman publik</p>
+          <p className="text-sm font-medium">{t("dashboard.settings.profile.themeLabel")}</p>
           <div className="mt-2 flex flex-wrap gap-2">
             {THEMES.map((key) => {
               const st = themeStyles(key);
               const active = theme === key;
-              // BAGIAN st.card GLASS bersifat transparan (bg-white/[8%]) karena
-              // dia untuk halaman publik gelap. Kalau dipakai langsung sebagai
-              // background TOMBOL picker, saat dashboard bertema terang (classic/
-              // coral) tombol Glass jadi putih-di-atas-putih dan "hilang" dari
-              // picker. st.chip = swatch SOLID per-preset, selalu kontras.
+              // The GLASS portion of st.card is transparent (bg-white/[8%])
+              // because it targets the dark public page. Used directly as the
+              // picker BUTTON background, the Glass chip would be
+              // white-on-white on light dashboard themes (classic/coral) and
+              // disappear from the picker. st.chip = a SOLID per-preset
+              // swatch that always contrasts.
               return (
                 <button
                   key={key}
                   type="button"
                   onClick={() => setTheme(key)}
                   aria-pressed={active}
-                  aria-label={`Tema ${st.label}`}
+                  aria-label={t("dashboard.settings.profile.themeOptionAria", { themeName: st.label })}
                   className={`w-28 ${st.radius} ${st.borderW} p-2 text-left transition-colors duration-150 ${st.chip} ${
                     active ? "ring-2 ring-flash-yellow ring-offset-1" : "opacity-75 hover:opacity-100"
                   }`}
                 >
                   <div className={`rounded-md border ${st.border} p-1.5`}>
-                    <div className={`h-2 w-10 rounded-sm ${st.avatar}`} />
-                    <div className="mt-1 h-1 w-full rounded-sm bg-current opacity-50" />
-                    <div className="mt-0.5 h-1 w-12 rounded-sm bg-current opacity-30" />
+                    {st.swatch ? (
+                      // RisoPrint (optional token): 3 ink strips: ink /
+                      // primary accent / secondary accent. Colors are applied
+                      // through inline style: a dynamic bg-[${hex}] class
+                      // cannot be scanned by Tailwind (purge).
+                      <div className="flex gap-1">
+                        {st.swatch.map((c) => (
+                          <div key={c} className="h-4 flex-1 rounded-sm" style={{ backgroundColor: c }} />
+                        ))}
+                      </div>
+                    ) : (
+                      <>
+                        <div className={`h-2 w-10 rounded-sm ${st.avatar}`} />
+                        <div className="mt-1 h-1 w-full rounded-sm bg-current opacity-50" />
+                        <div className="mt-0.5 h-1 w-12 rounded-sm bg-current opacity-30" />
+                      </>
+                    )}
                   </div>
                   <p className="mt-1.5 text-xs font-bold">{st.label}</p>
                 </button>
@@ -646,22 +917,20 @@ export default function DashboardClient() {
           </div>
         </div>
 
-        <motion.button
-          type="submit"
-          disabled={loading}
-          whileTap={{ scale: 0.97 }}
-          transition={{ duration: 0.2, ease: "easeOut" }}
-          className={`mt-2 rounded-full border-2 border-ink ${st.accent} px-4 py-2.5 text-sm font-bold transition-[filter] duration-150 hover:brightness-95 disabled:opacity-50`}
+        <SubmitButton
+          isLoading={loading}
+          loadingLabel={t("dashboard.actions.saving")}
+          className={`mt-2 rounded-full border-2 border-ink ${st.accent} px-4 py-2.5 text-sm font-bold transition-[filter] duration-150 hover:brightness-95`}
         >
-          {loading ? "..." : "Simpan Profil"}
-        </motion.button>
+          {t("dashboard.settings.profile.saveButton")}
+        </SubmitButton>
       </form>
 
       {notice !== "" && (
-        <p className={`mt-3 ${st.radius} ${st.borderW} ${st.border} ${st.card} px-4 py-2.5 text-sm font-medium`}>{notice}</p>
+        <p className={`${st.radius} ${st.borderW} ${st.border} ${st.card} px-4 py-2.5 text-sm font-medium`}>{notice}</p>
       )}
       {error !== "" && (
-        <p className={`mt-3 ${st.radius} ${st.borderW} ${st.border} ${st.card} px-4 py-2.5 text-sm font-medium`}>{error}</p>
+        <p className={`${st.radius} ${st.borderW} ${st.border} ${st.card} px-4 py-2.5 text-sm font-medium`}>{error}</p>
       )}
       </>
       )}
@@ -670,12 +939,12 @@ export default function DashboardClient() {
       <button
         type="button"
         onClick={() => setApiDocsOpen(!apiDocsOpen)}
-        className={`mt-4 flex items-center gap-1 text-sm font-medium ${st.textMuted} transition-colors duration-150`}
+        className={`flex items-center gap-1 text-sm font-medium ${st.textMuted} transition-colors duration-150`}
       >
-        Cara pakai API
+        {t("dashboard.settings.apiKeys.docsToggle")}
         <motion.span
           animate={{ rotate: apiDocsOpen ? 180 : 0 }}
-          transition={{ duration: 0.2 }}
+          transition={SPRING}
           className="inline-block"
         >
           ↓
@@ -688,10 +957,10 @@ export default function DashboardClient() {
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.25, ease: "easeInOut" }}
+            transition={SPRING}
             className="overflow-hidden"
           >
-            <p className={`mt-2 text-sm ${st.textMuted}`}>Contoh pemanggilan:</p>
+            <p className={`mt-2 text-sm ${st.textMuted}`}>{t("dashboard.settings.apiKeys.docsExampleIntro")}</p>
             <pre className={`mt-2 overflow-x-auto ${st.radius} ${st.borderW} ${st.border} ${st.card} px-4 py-3 font-mono text-sm leading-relaxed`}>
               <code>{`curl -X POST https://jejak.app/api/v1/shorten \\
   -H "Authorization: Bearer jjk_xxxxx" \\
@@ -702,65 +971,63 @@ export default function DashboardClient() {
         )}
       </AnimatePresence>
 
-      <form onSubmit={handleGenerateKey} className="mt-4 flex flex-col gap-2">
+      <form onSubmit={handleGenerateKey} className="flex flex-col gap-2">
         <label htmlFor="key-label" className="text-sm font-medium">
-          Label (opsional, untuk dikenali)
+          {t("dashboard.settings.apiKeys.labelLabel")}
           <input
             id="key-label"
             value={keyLabel}
             onChange={(e) => setKeyLabel(e.target.value)}
             maxLength={100}
-            placeholder="mis. CI script"
+            placeholder={t("dashboard.settings.apiKeys.labelPlaceholder")}
             className={`${inputThemed} mt-1`}
           />
         </label>
-        <motion.button
-          type="submit"
-          disabled={keyLoading}
-          whileTap={{ scale: 0.97 }}
-          transition={{ duration: 0.2, ease: "easeOut" }}
-          className={`rounded-full border-2 border-ink ${st.accent} px-4 py-2.5 text-sm font-bold transition-[filter] duration-150 hover:brightness-95 disabled:opacity-50`}
+        <SubmitButton
+          isLoading={keyLoading}
+          loadingLabel={t("dashboard.actions.creating")}
+          className={`rounded-full border-2 border-ink ${st.accent} px-4 py-2.5 text-sm font-bold transition-[filter] duration-150 hover:brightness-95`}
         >
-          {keyLoading ? "..." : "Buat Key Baru"}
-        </motion.button>
+          {t("dashboard.settings.apiKeys.createButton")}
+        </SubmitButton>
       </form>
 
       {generatedKey !== "" && (
-        <div className={`mt-3 ${st.radius} ${st.borderW} ${st.border} ${st.card} px-4 py-3`}>
-          <p className="text-sm font-bold">Simpan sekarang — tidak akan ditampilkan lagi!</p>
+        <div className={`${st.radius} ${st.borderW} ${st.border} ${st.card} px-4 py-3`}>
+          <p className="text-sm font-bold">{t("dashboard.settings.apiKeys.generatedWarning")}</p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <code className="min-w-0 break-all font-mono text-sm">{generatedKey}</code>
-            <CopyButton text={generatedKey} label="Salin" />
+            <CopyButton text={generatedKey} label={t("common.copy")} />
           </div>
         </div>
       )}
 
       {keyMsg !== "" && (
-        <p className={`mt-3 ${st.radius} ${st.borderW} ${st.border} ${st.card} px-4 py-2.5 text-sm font-medium`}>{keyMsg}</p>
+        <p className={`${st.radius} ${st.borderW} ${st.border} ${st.card} px-4 py-2.5 text-sm font-medium`}>{keyMsg}</p>
       )}
       {keyErr !== "" && (
-        <p className={`mt-3 ${st.radius} ${st.borderW} ${st.border} ${st.card} px-4 py-2.5 text-sm font-medium`}>{keyErr}</p>
+        <p className={`${st.radius} ${st.borderW} ${st.border} ${st.card} px-4 py-2.5 text-sm font-medium`}>{keyErr}</p>
       )}
 
-      <section className="mt-5">
-        <h2 className={`${st.headingFont} text-lg font-bold`}>Key aktif</h2>
+      <section>
+        <h2 className={`${st.headingFont} text-lg font-bold mb-4`}>{t("dashboard.settings.apiKeys.activeKeysTitle")}</h2>
         {apiKeys.length === 0 ? (
-          <p className="mt-2 text-sm text-muted">Belum ada key — buat satu lewat formulir di atas.</p>
+          <p className={`text-sm text-muted`}>{t("dashboard.emptyStates.noKeys")}</p>
         ) : (
-          <div className="mt-2 flex flex-col gap-2">
+          <div className="flex flex-col gap-4">
             {apiKeys.map((k) => (
-              <div key={k.id} className={`flex items-center justify-between gap-3 ${st.radius} ${st.borderW} ${st.border} ${st.card} px-4 py-2.5`}>
+              <div key={k.id} className={`flex items-center justify-between gap-3 ${st.radius} ${st.borderW} ${st.border} ${st.card} p-5 md:p-6`}>
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{k.label !== "" ? k.label : "(tanpa label)"}</p>
+                  <p className="truncate text-sm font-medium">{k.label !== "" ? k.label : t("dashboard.settings.apiKeys.noLabel")}</p>
                   <p className={`font-mono text-xs ${st.textMuted}`}>
-                    dibuat {fmtDate(k.created_at)} · terakhir dipakai {fmtDate(k.last_used_at)}
+                    {t("dashboard.settings.apiKeys.keyMeta", { createdAt: fmtDate(k.created_at), lastUsedAt: fmtDate(k.last_used_at) })}
                   </p>
                 </div>
                 <button
                   onClick={() => handleDeleteKey(k.id)}
                   className={`shrink-0 rounded-full ${st.borderW} ${st.border} ${st.card} px-3 py-0.5 text-xs font-bold transition-colors duration-150 hover:opacity-90`}
                 >
-                  Hapus
+                  {t("dashboard.settings.apiKeys.deleteButton")}
                 </button>
               </div>
             ))}
@@ -769,72 +1036,96 @@ export default function DashboardClient() {
       </section>
       </>
       )}
+      {tab === "pengaturan" && (
+        <PengaturanTab st={st} />
+      )}
       {tab === "links" && (
       <>
-      {/* TAHAP D: form shorten inline di puncak tab — user login bisa bikin
-          link baru TANPA keluar dashboard. `st` diteruskan biar form ikut
-          token tema dashboard yang aktif; onSuccess memanggil loadProfile()
-          (fungsi load link yang sudah ada) supaya link baru langsung muncul
-          di list bawahnya TANPA reload halaman penuh. */}
+      {/* Stage D: the shorten form sits inline at the top of the tab so an
+          authenticated visitor can create a new link WITHOUT leaving the
+          dashboard. `st` is passed so the form follows the active dashboard
+          theme tokens; onSuccess calls loadProfile() (the existing
+          link-loading function) so the new link appears in the list below
+          WITHOUT a full page reload. */}
       <ShortenForm st={st} onSuccess={() => loadProfile()} />
-      <ClicksChart theme={theme} st={st} />
       {links.length === 0 && bio === "" && apiKeys.length === 0 && (
-        <div className={`mt-4 ${st.radius} ${st.borderW} ${st.border} ${st.card} px-4 py-4`}>
-          <p className={`${st.headingFont} text-lg font-bold`}>Selamat datang! Mulai dari sini →</p>
-          <ol className="mt-3 flex flex-col gap-2 text-sm">
+          <div className={`${st.radius} ${st.borderW} ${st.border} ${st.card} p-5 md:p-6`}>
+          <p className={`${st.headingFont} text-lg font-bold mb-4`}>{t("dashboard.links.welcome.heading")}</p>
+          <ol className="flex flex-col gap-2 text-sm">
             <li>
-              1.{" "}
+              {welcomeStep1[0]}
               <button
                 type="button"
                 onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
                 className="font-medium text-flash-coral underline transition-colors duration-150 hover:text-ink"
               >
-                ↑ Buat short-link pertamamu di form atas
+                {t("dashboard.links.welcome.step1Action")}
               </button>
-              .
+              {welcomeStep1[1]}
             </li>
             <li>
-              2.{" "}
+              {welcomeStep2[0]}
               <button
                 type="button"
                 onClick={() => setTab("profil")}
                 className="font-medium text-flash-coral underline transition-colors duration-150 hover:text-ink"
               >
-                Lengkapi profil
-              </button>{" "}
-              biar halaman publikmu siap dibagikan.
+                {t("dashboard.links.welcome.step2Action")}
+              </button>
+              {welcomeStep2[1]}
             </li>
           </ol>
         </div>
       )}
-      <section className="mt-4">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className={`${st.headingFont} text-lg font-bold`}>Link saya</h2>
+      <section>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <h2 className={`${st.headingFont} text-lg font-bold`}>{t("dashboard.links.title")}</h2>
+          {/* Bulk actions (link management): mass import + download all QR
+              codes. Import runs in a modal; QR download goes through
+              fetch→blob in downloadAllQr so failures surface as toasts. */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={openBulk}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-full border-2 border-ink bg-white px-3 py-1.5 text-xs font-bold text-ink transition-transform duration-150 hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-flash-yellow"
+            >
+              {t("dashboard.links.toolbar.bulkImport")}
+            </button>
+            <button
+              type="button"
+              onClick={downloadAllQr}
+              title={t("dashboard.links.toolbar.qrDownloadTitle")}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-full border-2 border-ink bg-white px-3 py-1.5 text-xs font-bold text-ink transition-transform duration-150 hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-flash-yellow"
+            >
+              <Download size={14} aria-hidden="true" />
+              {t("dashboard.links.toolbar.qrDownload")}
+            </button>
+          </div>
         </div>
         {allTags.length > 0 && (
-          <div className="mt-2 flex items-center gap-2 text-sm">
-            <label htmlFor="tag-filter" className={st.textMuted}>Filter tag:</label>
+          <div className="mb-4 flex items-center gap-2 text-sm">
+            <label htmlFor="tag-filter" className={st.textMuted}>{t("dashboard.links.filter.label")}</label>
             <select
               id="tag-filter"
               value={tagFilter}
               onChange={(e) => setTagFilter(e.target.value)}
-              className={`rounded-full ${st.borderW} ${st.border} ${st.card} px-3 py-1 text-sm focus:outline-none`}
+              className={`rounded-full ${st.borderW} ${st.border} ${st.card} px-3 py-1 text-sm focus:border-flash-yellow focus:ring-2 focus:ring-flash-yellow/30 focus:outline-none transition-all duration-150`}
             >
-              <option value="">Semua</option>
-              {allTags.map((t) => (
-                <option key={t} value={t}>{t}</option>
+              <option value="">{t("dashboard.links.filter.allOption")}</option>
+              {allTags.map((tag) => (
+                <option key={tag} value={tag}>{tag}</option>
               ))}
             </select>
           </div>
         )}
         {links.length === 0 ? (
-          <p className={`mt-2 text-sm ${st.textMuted}`}>Belum ada link. Buat dari halaman utama dulu.</p>
+          <p className={`text-sm ${st.textMuted}`}>{t("dashboard.emptyStates.noLinks")}</p>
         ) : visibleLinks.length === 0 ? (
-          <p className={`mt-2 text-sm ${st.textMuted}`}>Tidak ada link dengan tag ini.</p>
+          <p className={`text-sm ${st.textMuted}`}>{t("dashboard.emptyStates.noTagMatch")}</p>
         ) : (
           <DndContext collisionDetection={closestCenter} onDragEnd={onDragEnd}>
             <SortableContext items={visibleLinks.map((l) => l.short_code)} strategy={verticalListSortingStrategy}>
-              <div className="mt-3 flex flex-col gap-2">
+              <div className="flex flex-col gap-4">
                 {visibleLinks.map((l) => (
                   <SortableLinkRow
                     key={l.short_code}
@@ -852,18 +1143,23 @@ export default function DashboardClient() {
           </DndContext>
         )}
         {orderMsg !== "" && (
-          <p className={`mt-2 text-sm ${st.textMuted}`}>{orderMsg}</p>
+          <p className={`text-sm ${st.textMuted}`}>{orderMsg}</p>
         )}
-      </section>
+        </section>
       </>
       )}
-      </motion.div>
+        </motion.div>
+      </AnimatePresence>
+      </div>
 
       <AnimatePresence>
         {qrCode !== null && (
           <QrModal
             shortCode={qrCode}
-            shortUrl={`${API_BASE}/r/${qrCode}`}
+            // The QR needs an absolute URL (not a path): use the BROWSER
+            // origin, not the backend: a scanned code must open the page's
+            // origin (through the Next proxy), never localhost:8081.
+            shortUrl={absoluteShortUrl(qrCode)}
             onClose={() => setQrCode(null)}
             st={st}
           />
@@ -876,6 +1172,12 @@ export default function DashboardClient() {
             onSaved={loadProfile}
             st={st}
           />
+        )}
+        {bulkOpen && (
+          <BulkImportModal st={st} onClose={() => setBulkOpen(false)} onImported={onBulkImported} />
+        )}
+        {shareOpen && (
+          <ShareModal username={username} onClose={() => setShareOpen(false)} />
         )}
       </AnimatePresence>
     </main>

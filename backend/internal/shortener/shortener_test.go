@@ -9,8 +9,8 @@ func TestGenerateShortCode(t *testing.T) {
 		length int
 		want   string
 	}{
-		{1, "a"}, // minimal length
-		{6, "abcdef"}, // typical length
+		{1, "a"},           // minimal length
+		{6, "abcdef"},      // typical length
 		{10, "abcdefghij"}, // longer code
 	}
 
@@ -46,16 +46,16 @@ func TestValidSlug(t *testing.T) {
 		want  bool
 		limit string // "valid", "too_short", "too_long", "bad_chars"
 	}{
-		{"a", false, "too_short"}, // 1 char < 3 minimum
-		{"ab", false, "too_short"}, // 2 chars < 3 minimum
-		{"abc", true, "valid"}, // exactly 3 chars
-		{"AbC123", true, "valid"}, // mixed case + digits
-		{"abc_xyz", true, "valid"}, // with underscore
-		{"abc-def", true, "valid"}, // with hyphen
-		{"abcdefghijklmnopqrstuvwxyz0123", true, "valid"}, // exactly 30 chars (26+4)
+		{"a", false, "too_short"},                              // 1 char < 3 minimum
+		{"ab", false, "too_short"},                             // 2 chars < 3 minimum
+		{"abc", true, "valid"},                                 // exactly 3 chars
+		{"AbC123", true, "valid"},                              // mixed case + digits
+		{"abc_xyz", true, "valid"},                             // with underscore
+		{"abc-def", true, "valid"},                             // with hyphen
+		{"abcdefghijklmnopqrstuvwxyz0123", true, "valid"},      // exactly 30 chars (26+4)
 		{"abcdefghijklmnopqrstuvwxyz01234", false, "too_long"}, // 31 chars > 30
-		{"abc!", false, "bad_chars"}, // invalid character
-		{"ab c", false, "bad_chars"}, // space
+		{"abc!", false, "bad_chars"},                           // invalid character
+		{"ab c", false, "bad_chars"},                           // space
 	}
 
 	for _, tt := range tests {
@@ -68,8 +68,8 @@ func TestValidSlug(t *testing.T) {
 
 func TestIsReserved(t *testing.T) {
 	tests := []struct {
-		slug   string
-		want   bool // true = reserved (should be rejected), false = OK
+		slug string
+		want bool // true = reserved (should be rejected), false = OK
 	}{
 		{"api", true},
 		{"u", true},
@@ -85,11 +85,11 @@ func TestIsReserved(t *testing.T) {
 		{"API", true},
 		{"Login", true},
 		// These should NOT be reserved
-		{"apiku", false}, // "apiku" != "api" exact match
-		{"urlink", false}, // not reserved
+		{"apiku", false},     // "apiku" != "api" exact match
+		{"urlink", false},    // not reserved
 		{"myprofile", false}, // not reserved
-		{"ufoo", false}, // starts with u but not exact "u"
-		{" r", false}, // space padding
+		{"ufoo", false},      // starts with u but not exact "u"
+		{" r", false},        // space padding
 	}
 
 	for _, tt := range tests {

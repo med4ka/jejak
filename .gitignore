@@ -1,4 +1,4 @@
-# Secrets / env — JANGAN pernah commit kredensial lokal.
+# Secrets / env: JANGAN pernah commit kredensial lokal.
 # .env.example tetap di-track; .env berisi nilai asli (password, URL).
 .env
 .env.*
@@ -16,7 +16,7 @@
 # Hasil build/harness lokal (bin/, screenshot/loadtest output).
 /bin/
 
-# Uploaded avatars — data runtime, bukan source.
+# Uploaded avatars: data runtime, bukan source.
 # Folder tetap ada via backend/uploads/avatars/.gitkeep.
 /backend/uploads/*
 !/backend/uploads/avatars/

@@ -1,7 +1,7 @@
 -- +goose Up
--- Reorder link kreator: kolom position (int, default 0). Baris lama otomatis
--- 0 semua sehingga urutan lama (id DESC) tidak berubah sampai user me-reorder.
--- Dijalankan di primary DAN replica.
+-- Creator link reorder: position column (int, default 0). Existing rows are
+-- all 0, so the old order (id DESC) does not change until the user reorders.
+-- Run on primary AND replica.
 
 ALTER TABLE urls ADD COLUMN IF NOT EXISTS position INTEGER NOT NULL DEFAULT 0;
 

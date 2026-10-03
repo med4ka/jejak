@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 
 const GO_API_URL = process.env.GO_API_URL || "http://localhost:8081";
 
-// Proxy profil milik sendiri -> Go (GET baca, PUT update). Cookie sesi
-// WAJIB diteruskan masuk (tanpa ini Go menjawab 401), dan Set-Cookie
-// balasan diteruskan keluar (simetris dengan route auth lain).
+// Proxy for the caller's own profile -> Go (GET read, PUT update). The session
+// cookie MUST be forwarded inbound (otherwise Go answers 401), and the reply
+// Set-Cookie is forwarded outbound (symmetric with the other auth routes).
 async function proxyProfile(req, method) {
   const cookie = req.headers.get("cookie") || "";
   let body;

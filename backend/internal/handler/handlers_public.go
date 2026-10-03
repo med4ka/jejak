@@ -7,17 +7,15 @@ import (
 	"jejak/internal/db"
 )
 
-// LEARN:
-//
-//	Kenapa: Halaman publik kreator (/api/u/{username}) memakai denormalized
-//	urls.click_count — 1 query WHERE creator_id (lihat db.ListLinksByCreator),
-//	BUKAN 1 query list + N query count (N+1). Keputusan ini disengaja (PRD Fase 9):
-//	counter sudah di-maintain di path redirect, jadi baca profil tidak perlu
-//	agregat click_events yang berat.
-//	Trade-off: Angka bisa sedikit basi vs click_events real-time (replica lag +
-//	async worker), tapi halaman profil butuh cepat, bukan audit-grade.
-//	Alternatif: JOIN agregat COUNT(click_events) GROUP BY — tepat tapi mahal
-//	dan mengalahkan tujuan denormalisasi Fase 2.
+// HandleCreatorLinks serves the public creator page (/api/u/{username}) from
+// the denormalized urls.click_count: a single WHERE creator_id query (see
+// db.ListLinksByCreator), NOT one list query plus N count queries (N+1). The
+// choice is deliberate (PRD Phase 9): the counter is maintained on the
+// redirect path, so reading a profile needs no heavy click_events
+// aggregation. Trade-off: the figure can lag real-time click_events
+// (denormalization plus an async worker), but a profile page must be fast,
+// not audit-grade. A COUNT(click_events) GROUP BY join would be exact but
+// expensive, and would defeat the Phase 2 denormalization.
 func (h *Handler) HandleCreatorLinks(username string, w http.ResponseWriter, r *http.Request) {
 	creator, err := h.Store.GetCreatorByUsername(username)
 	if err != nil {

@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 
 const GO_API_URL = process.env.GO_API_URL || "http://localhost:8081";
 
-// Proxy register -> Go. PENTING: teruskan header Set-Cookie dari Go ke
-// browser — tanpa ini sesi login tidak pernah sampai ke client karena
-// NextResponse.json() tidak meneruskan header itu otomatis.
+// Proxy register -> Go. IMPORTANT: forward Go's Set-Cookie header to the
+// browser: without it the login session never reaches the client, because
+// NextResponse.json() does not forward that header automatically.
 export async function POST(req) {
   const body = await req.json();
 

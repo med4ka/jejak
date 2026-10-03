@@ -1,0 +1,639 @@
+{
+  "nav": {
+    "brand": "JEJAK",
+    "aria": {
+      "mainMenu": "Hauptmenü",
+      "mobileMenu": "Mobiles Menü",
+      "drawer": "Navigationsmenü",
+      "openMenu": "Menü öffnen",
+      "closeMenu": "Menü schließen",
+      "accountMenu": "Kontomenü"
+    },
+    "menu": {
+      "features": "Funktionen",
+      "dashboard": "Dashboard",
+      "demo": "Demo",
+      "faq": "FAQ"
+    },
+    "features": {
+      "customSlug": {
+        "label": "Eigener Slug",
+        "desc": "Deine Links wirken professionell"
+      },
+      "smartLink": {
+        "label": "Smart Link",
+        "desc": "Weiterleitung pro Gerät"
+      },
+      "qrCode": {
+        "label": "QR-Code",
+        "desc": "Zum Scannen bereit"
+      },
+      "analytics": {
+        "label": "Analyse",
+        "desc": "Leistung im Blick behalten"
+      }
+    },
+    "cta": {
+      "newLink": "Neuer Link",
+      "login": "Anmelden",
+      "register": "Kostenlos registrieren →"
+    },
+    "account": {
+      "title": "@{username}",
+      "titleFallback": "Konto",
+      "nameFallback": "Benutzer",
+      "profile": "Profil",
+      "logout": "Abmelden"
+    },
+    "claimMessage": "{count} Links zu deinem Konto hinzugefügt"
+  },
+  "landing": {
+    "hero": {
+      "badge": "LINK-IN-BIO FÜR KREATOREN",
+      "headline": "Eine Seite,\nalle deine Links.",
+      "subheadline": "Kürze all deine Social-Media-Links zu einer Seite, die du teilen kannst: mit intelligenter Weiterleitung pro Gerät und umfassenden Analysen dahinter.",
+      "proof": "Probier zuerst: erstelle einen Link ganz ohne Anmeldung und teile ihn sofort."
+    },
+    "mockup": {
+      "badge": "Beispiel",
+      "copyButton": "Kopieren"
+    },
+    "socialProof": {
+      "caption": "Eine Seite für Links von all deinen Plattformen",
+      "platforms": {
+        "youtube": "Youtube",
+        "shopee": "Shopee",
+        "instagram": "Instagram",
+        "tiktok": "TikTok",
+        "tokopedia": "Tokopedia",
+        "spotify": "Spotify"
+      },
+      "stats": {
+        "free": {
+          "value": "Kostenlos",
+          "label": "Kernfunktionen ohne Kosten"
+        },
+        "instant": {
+          "value": "Sofort",
+          "label": "ein Link in 1 Schritt"
+        },
+        "honest": {
+          "value": "Ehrlich",
+          "label": "Klickzahlen aus echten Daten"
+        }
+      }
+    },
+    "features": {
+      "heading": "Warum Jejak?",
+      "items": {
+        "customSlug": {
+          "title": "Eigener Slug",
+          "desc": "Bestimme selbst den kurzen Code, damit deine Marke sichtbar ist statt einer zufälligen Zeichenkette. Zum Beispiel jejak.app/r/dein-name."
+        },
+        "smartLink": {
+          "title": "Smart Link",
+          "desc": "Ein Link, ein anderes Ziel pro Gerät: Schick Besucher auf dem Smartphone zu WhatsApp und am Desktop zu deiner Website. Automatisch."
+        },
+        "qrCode": {
+          "title": "QR-Code",
+          "desc": "Aus deinem Link wird ein scannbarer QR-Code für Poster, Verpackungen oder Visitenkarten. Änderst du den Link, aktualisiert sich der QR-Code mit."
+        },
+        "analytics": {
+          "title": "Analyse",
+          "desc": "Verfolge Klicks, eindeutige Besucher und die Leistung jedes Links: alles auf einem Dashboard, echte Zahlen statt Attrappen."
+        }
+      }
+    },
+    "demo": {
+      "heading": "Schau, wie dein Link aussieht",
+      "slugLabel": "Gib deinen Slug ein",
+      "slugPlaceholder": "dein-name",
+      "previewNote": "Vorschau deines Links: mit dem QR-Code daneben, der sich in Echtzeit mitändert."
+    },
+    "faq": {
+      "heading": "Hast du Fragen?",
+      "items": {
+        "comparison": {
+          "q": "Was unterscheidet Jejak von bit.ly oder Linktree?",
+          "a": "Jejak ist All-in-One: eine App, um Links zu kürzen (mit eigenem Slug), eine eigene Link-in-bio-Profilseite zu erstellen und ein Dashboard mit Klickzahlen pro Link anzusehen: plus QR-Code und Indie-Druck-Themen. So musst du nicht mehrere Dienste gleichzeitig nutzen."
+        },
+        "free": {
+          "q": "Ist das kostenlos?",
+          "a": "Ja. Dashboard, öffentliche Profilseite, eigener Slug und Klickzahlen sind in dieser Phase alle kostenlos: keine Karte nötig. Sollten später kostenpflichtige Funktionen dazukommen, kündigen wir das vorher klar an, nicht heimlich."
+        },
+        "customSlug": {
+          "q": "Kann ich meinen eigenen Namen / einen eigenen Slug verwenden?",
+          "a": "Ja. Das ist geradezu die Kernfunktion von Jejak: Du legst den kurzen Code selbst fest (zum Beispiel jejak.app/r/dein-name), damit er leicht zu merken ist & damit du im Dashboard die Klickzahlen jedes Links siehst. Keine zufällige Zeichenkette."
+        },
+        "analytics": {
+          "q": "Funktionieren Analysen / Klickzahlen sofort?",
+          "a": "Sofort. Jeder Link hat eine Klickzahl, die im Dashboard und auf der Profilseite erscheint: ehrliche Zahlen, die echten Klicks entsprechen, keine Attrappen, damit es voll wirkt. Plus ein QR-Code pro Link, der sich ebenfalls scannen lässt."
+        }
+      }
+    },
+    "accent": {
+      "title": "Kostenlos.",
+      "subtitle": "Dashboard, eigener Slug, QR und Analysen: in dieser Phase ohne Karte.",
+      "eyebrow": "für Indie-Kreatoren"
+    },
+    "cta": {
+      "heading": "Interessiert? Jetzt kostenlos registrieren.",
+      "subtext": "Keine Karte, kein Aufwand: Kürze deine Links direkt und sieh dir die Analysen an.",
+      "button": "Kostenlos registrieren"
+    }
+  },
+  "footer": {
+    "brand": "Jejak",
+    "tagline": "Eine Seite für alle deine Links: gemacht für Indie-Kreatoren in Indonesien.",
+    "columnTitles": {
+      "product": "Produkt",
+      "company": "Unternehmen",
+      "legal": "Rechtliches"
+    },
+    "links": {
+      "shorten": "Kürzen",
+      "linkInBio": "Link-in-bio",
+      "qrCode": "QR-Code",
+      "contact": "Kontakt",
+      "privacy": "Datenschutzerklärung",
+      "terms": "Nutzungs- & Geschäftsbedingungen"
+    },
+    "copyright": "© {year} Jejak: gedruckt mit {heart} in Indonesien"
+  },
+  "dashboard": {
+    "metadata": {
+      "title": "Dashboard: Jejak",
+      "description": "Bearbeite dein Kreator-Profil und sieh dir Links + Analysen an."
+    },
+    "heading": "Dashboard",
+    "loading": {
+      "general": "Wird geladen...",
+      "dashboardLabel": "Dashboard wird geladen"
+    },
+    "notLoggedIn": "Melde dich zuerst über die Anmelden-Schaltfläche in der Navigationsleiste an, um dein Profil zu bearbeiten.",
+    "redirectNotice": "Wird weitergeleitet...",
+    "tabs": {
+      "ringkasan": "Übersicht",
+      "linkSaya": "Meine Links",
+      "analytics": "Analyse",
+      "profile": "Profil",
+      "apiKeys": "API-Schlüssel",
+      "settings": "Einstellungen"
+    },
+    "actions": {
+      "copy": "Kopieren",
+      "saving": "Wird gespeichert...",
+      "creating": "Wird erstellt..."
+    },
+    "ringkasan": {
+      "greeting": "Hallo, {displayName}",
+      "greetingFallback": "Hallo",
+      "subtitle": "Das ist deine Jejak-Übersicht für heute.",
+      "stats": {
+        "totalLinks": "Aktive Links gesamt",
+        "totalClicks": "Klicks gesamt",
+        "uniqueClicks30d": "Eindeutige Klicks (30 Tage)",
+        "growthPct": "Wachstum %"
+      },
+      "trendTitle": "Trend der letzten 30 Tage",
+      "topLinksTitle": "Beliebteste Links",
+      "topLinks": {
+        "clickCount": "{count} Klicks"
+      }
+    },
+    "links": {
+      "title": "Meine Links",
+      "welcome": {
+        "heading": "Willkommen! Starte hier →",
+        "step1": "1. {action}.",
+        "step1Action": "↑ Erstelle deinen ersten Kurz-Link im Formular oben",
+        "step2": "2. {action}, damit deine öffentliche Seite zum Teilen bereit ist.",
+        "step2Action": "Vervollständige dein Profil"
+      },
+      "toolbar": {
+        "bulkImport": "Massenimport",
+        "qrDownloadTitle": "QR-Codes aller Links (oder passend zum Tag-Filter) in 1 ZIP herunterladen: max. 200",
+        "qrDownload": "QR herunterladen"
+      },
+      "filter": {
+        "label": "Tag-Filter:",
+        "allOption": "Alle"
+      },
+      "row": {
+        "dragDisabledTitle": "Setze den Filter zurück, um zu sortieren",
+        "dragTitle": "Zum Sortieren ziehen",
+        "featureTitle": "Als Favorit markieren",
+        "unfeatureTitle": "Favorit entfernen",
+        "meta": "/{shortCode} · {count} Klicks",
+        "editTooltip": "URL pro Gerät & Tags einstellen",
+        "edit": "Bearbeiten",
+        "qr": "QR",
+        "activateTooltip": "Wieder aktivieren (Weiterleitung funktioniert wieder)",
+        "deactivateTooltip": "Link deaktivieren (Weiterleitung liefert 410, bleibt im Dashboard sichtbar)",
+        "active": "Aktiv",
+        "inactive": "Inaktiv",
+        "badges": {
+          "expired": "Abgelaufen",
+          "endsIn": "Endet in {hours} h"
+        }
+      },
+      "order": {
+        "savingOrder": "Reihenfolge wird gespeichert...",
+        "orderSaved": "Reihenfolge gespeichert.",
+        "orderFailed": "Speichern fehlgeschlagen: Reihenfolge zurückgesetzt.",
+        "savingFeature": "Favorit wird gespeichert...",
+        "removingFeature": "Favorit wird entfernt...",
+        "featureSaved": "Favorit gespeichert.",
+        "featureRemoved": "Favorit entfernt.",
+        "savingStatus": "Status wird gespeichert...",
+        "statusActive": "Link wieder aktiv.",
+        "statusInactive": "Link deaktiviert.",
+        "failed": "Fehlgeschlagen: Änderungen zurückgesetzt."
+      }
+    },
+    "analytics": {
+      "ranges": {
+        "last7Days": "7 Tage",
+        "last30Days": "30 Tage",
+        "last90Days": "90 Tage"
+      },
+      "devices": {
+        "desktop": "Desktop",
+        "mobile": "Mobil",
+        "tablet": "Tablet",
+        "bot": "Bot",
+        "unknown": "Unbekannt"
+      },
+      "referrers": {
+        "direct": "Direkt",
+        "search": "Suchmaschinen",
+        "social": "Soziale Netzwerke",
+        "chat": "Chat-Apps",
+        "other": "Sonstige"
+      },
+      "exports": {
+        "daily": "Tägliche Übersicht",
+        "perLink": "Pro Link",
+        "rawClicks": "Ungefilterte Klicks"
+      },
+      "deviceTitle": "Geräte",
+      "referrerTitle": "Quellen",
+      "sourceOfData": "Datenquelle: {dataPer}",
+      "exportTitle": "CSV-Export",
+      "exportDescription": "Lade die Daten des Zeitraums {rangeLabel} herunter, um sie in einer Tabellenkalkulation zu öffnen. Maximal 10.000 Zeilen pro Datei; enthält die Datei mehr Daten, vermerkt sie die Kürzung in der letzten Spalte."
+    },
+    "chart": {
+      "heading": "Klicks der letzten {days} Tage",
+      "loading": "Diagramm wird geladen...",
+      "empty": "Noch keine Klicks in den letzten {days} Tagen: teile deinen Link, damit das Diagramm lebendig wird.",
+      "tooltipClickCount": "{count} Klicks",
+      "months": {
+        "jan": "Jan",
+        "feb": "Feb",
+        "mar": "Mär",
+        "apr": "Apr",
+        "may": "Mai",
+        "jun": "Jun",
+        "jul": "Jul",
+        "aug": "Aug",
+        "sep": "Sep",
+        "oct": "Okt",
+        "nov": "Nov",
+        "dec": "Dez"
+      }
+    },
+    "emptyStates": {
+      "noLinks": "Noch keine Links. Erstelle zuerst einen auf der Hauptseite.",
+      "noTagMatch": "Keine Links mit diesem Tag.",
+      "noKeys": "Noch keine Schlüssel: erstelle einen über das Formular oben.",
+      "noTopLinks": "Noch keine Links: erstelle zuerst einen im Tab Meine Links.",
+      "noClicks30d": "Noch keine Klicks in den letzten 30 Tagen.",
+      "noClicksInRange": "Noch keine Klicks in diesem Zeitraum."
+    },
+    "settings": {
+      "profile": {
+        "publicPageLabel": "Deine öffentliche Seite:",
+        "viewProfile": "Profil ansehen",
+        "displayNameLabel": "Anzeigename",
+        "bioLabel": "Bio (max. 500)",
+        "avatarLabel": "Avatar",
+        "avatarChange": "Foto ändern",
+        "avatarAlt": "Avatar",
+        "avatarFileHint": "Neues Foto: wird beim Speichern des Profils hochgeladen.",
+        "avatarUrlLabel": "... oder direkte Avatar-URL (leer lassen = ohne Avatar)",
+        "avatarUrlPlaceholder": "https://...",
+        "socialsLabel": "Soziale Links (max. 10)",
+        "socialPlatformPlaceholder": "Plattform (z. B. IG)",
+        "socialUrlPlaceholder": "https://...",
+        "removeSocialAria": "Entfernen",
+        "addSocial": "+ Sozialen Link hinzufügen",
+        "themeLabel": "Thema der öffentlichen Seite",
+        "themeOptionAria": "Thema {themeName}",
+        "saveButton": "Profil speichern",
+        "savedNotice": "Profil gespeichert."
+      },
+      "apiKeys": {
+        "docsToggle": "So nutzt du die API",
+        "docsExampleIntro": "Beispielaufruf:",
+        "labelLabel": "Bezeichnung (optional, zur Wiedererkennung)",
+        "labelPlaceholder": "z. B. CI-Skript",
+        "createButton": "Neuen Schlüssel erstellen",
+        "generatedWarning": "Speichere ihn jetzt: er wird nicht noch einmal angezeigt!",
+        "activeKeysTitle": "Aktive Schlüssel",
+        "noLabel": "(ohne Bezeichnung)",
+        "keyMeta": "erstellt {createdAt} · zuletzt verwendet {lastUsedAt}",
+        "deleteButton": "Löschen",
+        "deleteConfirm": "Diesen API-Schlüssel löschen? Integrationen, die ihn verwenden, stellen ihren Betrieb ein.",
+        "createdNotice": "Schlüssel erstellt. Jetzt kopieren: er wird nicht noch einmal angezeigt.",
+        "deletedNotice": "Schlüssel gelöscht."
+      },
+      "account": {
+        "email": {
+          "title": "E-Mail ändern",
+          "description": "Die neue E-Mail gilt für dein Konto. Zur Bestätigung wird dein Passwort benötigt.",
+          "emailLabel": "Neue E-Mail",
+          "emailPlaceholder": "name@example.com",
+          "passwordLabel": "Aktuelles Passwort",
+          "submit": "E-Mail speichern"
+        },
+        "password": {
+          "title": "Passwort ändern",
+          "description": "Nach der Änderung werden alle anderen Geräte automatisch abgemeldet.",
+          "currentLabel": "Aktuelles Passwort",
+          "newLabel": "Neues Passwort (min. 8 Zeichen)",
+          "confirmLabel": "Neues Passwort wiederholen",
+          "submit": "Passwort speichern"
+        },
+        "danger": {
+          "title": "Gefahrenbereich",
+          "logoutTitle": "Von allen Geräten abmelden",
+          "logoutDescription": "Beende die Sitzung auf allen Geräten, einschließlich diesem.",
+          "logoutButton": "Überall abmelden",
+          "deleteTitle": "Konto löschen",
+          "deleteDescription": "Löscht dein Profil, alle Links, Analysen und API-Schlüssel dauerhaft.",
+          "deleteButton": "Konto löschen"
+        },
+        "confirmLogout": {
+          "title": "Von allen Geräten abmelden?",
+          "description": "Alle aktiven Sitzungen (auch diese) werden beendet. Du musst dich auf jedem Gerät erneut anmelden.",
+          "confirmLabel": "Ja, überall abmelden"
+        },
+        "confirmDelete": {
+          "title": "Konto dauerhaft löschen?",
+          "description": "Diese Aktion kann nicht rückgängig gemacht werden. Dein Profil, alle Links, Analysen und API-Schlüssel gehen endgültig verloren.",
+          "confirmLabel": "Dauerhaft löschen",
+          "typeToken": "LÖSCHEN",
+          "passwordLabel": "Aktuelles Passwort (erforderlich)"
+        }
+      }
+    }
+  },
+  "onboarding": {
+    "regionLabel": "Leitfaden für den Einstieg",
+    "title": "Starte hier",
+    "closeLabel": "Anleitung schließen",
+    "progressLabel": "Fortschritt der Einführung",
+    "steps": {
+      "link": {
+        "label": "Erstelle deinen ersten Link",
+        "cta": "Link erstellen"
+      },
+      "profile": {
+        "label": "Vervollständige dein öffentliches Profil",
+        "cta": "Vervollständigen"
+      },
+      "share": {
+        "label": "Teile deine öffentliche Seite",
+        "cta": "Teilen"
+      }
+    }
+  },
+  "auth": {
+    "usernamePlaceholder": "benutzername",
+    "login": {
+      "ariaLabel": "Anmelden",
+      "title": "Anmelden",
+      "subtitle": "Die Anmeldesitzung wird als HttpOnly-Cookie gespeichert.",
+      "passwordPlaceholder": "passwort",
+      "submit": "Anmelden",
+      "submitLoading": "Anmeldung läuft..."
+    },
+    "register": {
+      "ariaLabel": "Registrieren",
+      "title": "Als Kreator registrieren",
+      "subtitle": "Ein Konto, eine öffentliche Seite für alle deine Links.",
+      "displayNamePlaceholder": "Anzeigename",
+      "bioPlaceholder": "Kurze Bio (optional)",
+      "passwordPlaceholder": "Passwort (min. 8 Zeichen)",
+      "submit": "Konto erstellen",
+      "submitLoading": "Registrierung läuft..."
+    }
+  },
+  "toast": {
+    "emailInvalid": "Ungültige E-Mail-Adresse.",
+    "emailCurrentPasswordRequired": "Gib dein aktuelles Passwort ein.",
+    "emailUpdated": "E-Mail aktualisiert.",
+    "passwordCurrentRequired": "Gib dein aktuelles Passwort ein.",
+    "newPasswordTooShort": "Das neue Passwort muss mindestens 8 Zeichen lang sein.",
+    "passwordMismatch": "Die neuen Passwörter stimmen nicht überein.",
+    "passwordUpdated": "Passwort aktualisiert. Andere Geräte wurden abgemeldet.",
+    "allDevicesLoggedOut": "Alle Geräte wurden abgemeldet.",
+    "accountDeleted": "Konto gelöscht.",
+    "noLinksWithTag": "Keine Links mit diesem Tag.",
+    "noLinksToDownload": "Noch keine Links zum Herunterladen.",
+    "tooManyLinksForQr": "Zu viele Links ({count}): vorher nach Tag filtern (max. 200).",
+    "qrDownloaded": "{count} QR-Codes heruntergeladen."
+  },
+  "errors": {
+    "auth": {
+      "requestFailed": "Fehlgeschlagen"
+    },
+    "shorten": {
+      "createFailed": "Link konnte nicht erstellt werden: prüfe die URL und versuche es erneut."
+    },
+    "editLink": {
+      "saveFailed": "Speichern fehlgeschlagen"
+    },
+    "bulkImport": {
+      "importFailed": "Import der Links fehlgeschlagen: versuche es erneut.",
+      "reasonNotHttp": "muss http(s) sein",
+      "reasonNotUrl": "keine gültige URL",
+      "reasonDuplicate": "Duplikat",
+      "nothingCreated": "Es wurden keine Links erstellt."
+    },
+    "copy": {
+      "failed": "Fehlgeschlagen"
+    },
+    "account": {
+      "requestFailed": "Anfrage fehlgeschlagen"
+    },
+    "dashboard": {
+      "loginRequired": "Melde dich zuerst über die Anmelden-Schaltfläche in der Navigationsleiste an, um dein Profil zu bearbeiten.",
+      "loadProfile": "Profil konnte nicht geladen werden",
+      "loadKey": "Schlüssel konnte nicht geladen werden",
+      "generateKey": "Schlüssel konnte nicht erstellt werden",
+      "deleteKey": "Schlüssel konnte nicht gelöscht werden",
+      "reorderFailed": "Speichern fehlgeschlagen: Reihenfolge zurückgesetzt.",
+      "changeReverted": "Fehlgeschlagen: Änderungen zurückgesetzt.",
+      "qrZipFailed": "QR-ZIP konnte nicht erstellt werden.",
+      "uploadPhotoFailed": "Foto konnte nicht hochgeladen werden",
+      "saveProfile": "Speichern fehlgeschlagen"
+    },
+    "analytics": {
+      "breakdownLoad": "Analysen konnten nicht geladen werden",
+      "chartLoad": "Diagramm konnte nicht geladen werden"
+    },
+    "api": {
+      "unreachable": "Go-API nicht erreichbar",
+      "invalidRequestBody": "Ungültiger Anfragekörper",
+      "upstream": "Go-API-Fehler"
+    },
+    "redirect": {
+      "notFoundTitle": "Link nicht gefunden.",
+      "notFoundText": "Diesen Link gibt es nicht (mehr) oder er enthält einen Tippfehler. Öffne die Profilseite des Erstellers erneut, um dessen Linkliste zu prüfen.",
+      "expiredTitle": "Dieser Link ist abgelaufen.",
+      "expiredText": "Dieser Link ist über seine Gültigkeitsdauer hinaus und kann nicht mehr geöffnet werden.",
+      "serverTitle": "Es gibt gerade ein Problem. Versuche es erneut.",
+      "serverText": "Der Jejak-Server ist ausgelastet oder noch nicht verbunden. Bitte versuche es gleich noch einmal.",
+      "invalidCode": "Ungültiger Link-Code"
+    }
+  },
+  "notFound": {
+    "title": "Diese Seite hinterlässt keine Spur.",
+    "subtitle": "Vielleicht ist der Link falsch oder wurde verschoben.",
+    "goHomeButton": "Zurück zur Startseite",
+    "checkLinksButton": "Deine Links prüfen"
+  },
+  "terms": {
+    "title": "Nutzungs- & Geschäftsbedingungen",
+    "paragraph1": "Mit der Nutzung von Jejak erklären Sie sich damit einverstanden, diesen Dienst angemessen zu verwenden: rechtmäßige Links zu erstellen, die Funktion zum Kürzen von Links nicht zu missbrauchen und keine Inhalte hochzuladen, die gegen geltendes Recht verstoßen.",
+    "paragraph2": "Diese Seite ist noch ein Platzhalter: Der offizielle Text der Nutzungs- & Geschäftsbedingungen wird derzeit ausgearbeitet und hier vor der offiziellen Veröffentlichung veröffentlicht. Sollten Sie Fragen haben, kontaktieren Sie uns bitte über die Kontaktseite.",
+    "lastUpdated": "Zuletzt aktualisiert: (noch nicht in Kraft).",
+    "backToHome": "Zurück zur Startseite"
+  },
+  "privacy": {
+    "title": "Datenschutzerklärung",
+    "paragraph1": "Wir erheben nur die Daten, die für den Betrieb von Jejak erforderlich sind: das von Ihnen registrierte Konto sowie Besuchsstatistiken Ihrer Links (Klicks, Referrer, Zeit) für die Auswertung im Dashboard.",
+    "paragraph2": "Diese Seite ist noch ein Platzhalter: Die vollständige Datenschutzerklärung: einschließlich Datenaufbewahrung, Cookies und Ihrer Rechte bezüglich Ihrer Daten: wird derzeit ausgearbeitet und hier vor der offiziellen Veröffentlichung veröffentlicht.",
+    "lastUpdated": "Zuletzt aktualisiert: (noch nicht in Kraft).",
+    "backToHome": "Zurück zur Startseite"
+  },
+  "contact": {
+    "title": "Kontakt",
+    "paragraph1": "Du hast eine Frage, einen Vorschlag oder einen Fehlerbericht? Wir freuen uns über Rückmeldungen von Kreatoren, die Jejak nutzen: ob Link-in-bio, Link-Kürzer oder Analysen.",
+    "paragraph2": "Schreib uns eine E-Mail an {email}, dann antworten wir so schnell wie möglich. Diese Seite ist noch ein Platzhalter: weitere Kontaktwege (Formular, soziale Netzwerke) folgen.",
+    "responseTime": "Wir antworten in der Regel innerhalb von 1-2 Werktagen.",
+    "backToHome": "Zurück zur Startseite"
+  },
+  "forms": {
+    "appPage": {
+      "badge": "Link-in-bio für Kreatoren",
+      "headingLine1": "Eine Seite",
+      "headingLine2": "für alle deine Links.",
+      "subtitle": "Kürze die Links unten: wenn du angemeldet bist, landen sie automatisch in deinem öffentlichen Profil.",
+      "analyticsLink": "Analysen ansehen →"
+    },
+    "shorten": {
+      "urlAriaLabel": "Originale URL, die du kürzen möchtest",
+      "urlPlaceholder": "https://beispiel.com/dein-link",
+      "loadingLabel": "Link wird erstellt...",
+      "submitLabel": "Kürzen",
+      "slugAriaLabel": "Eigener Slug (optional)",
+      "slugPlaceholder": "Eigener Slug (optional, 3-30: Buchstaben/Zahlen/_/-)",
+      "tagAriaLabel": "Tag (optional)",
+      "tagPlaceholder": "Tag (optional, kommagetrennt: z. B. youtube, promo)",
+      "expiryAriaLabel": "Aktiv bis (optional)",
+      "helperText": "Optional: nach dieser Zeit stellt der Link die Weiterleitung ein (410). Die Zeit wird in deiner lokalen Zeitzone angezeigt.",
+      "resultHint": "Klicke, um die Weiterleitung zu öffnen."
+    },
+    "editLink": {
+      "dialogAriaLabel": "Link /{shortCode} bearbeiten",
+      "shortCode": "/{shortCode}",
+      "mainUrlLabel": "Haupt-URL: {originalUrl}",
+      "iosLabel": "URL für iOS (optional)",
+      "iosPlaceholder": "https://apps.apple.com/...",
+      "androidLabel": "URL für Android (optional)",
+      "androidPlaceholder": "https://play.google.com/...",
+      "tagLabel": "Tag (kommagetrennt, max. 5)",
+      "tagPlaceholder": "deeplink, promo",
+      "expiryLabel": "Aktiv bis (optional)",
+      "clearExpiryTitle": "Zeitlimit entfernen (dauerhaft aktiv)",
+      "expiryCurrent": "Aktuell: {formattedDate}",
+      "noExpiryHint": "Kein Zeitlimit: leer lassen, um dauerhaft aktiv zu bleiben."
+    },
+    "bulkImport": {
+      "title": "Mehrere Links importieren",
+      "description": "Füge 10-100 URLs ein, eine pro Zeile. Leere Zeilen werden ignoriert.",
+      "urlLabel": "URLs (eine pro Zeile)",
+      "urlPlaceholder": "https://beispiel.com/1\nhttps://beispiel.com/2\nhttps://beispiel.com/3",
+      "totalLinesCount": "{totalLines} URLs",
+      "maxWarning": ": max. 100",
+      "minWarning": ": min. 10",
+      "validCount": "{validCount} gültig",
+      "lineLabel": "Zeile {line}",
+      "tagLabel": "Tag für alle importierten Links (optional)",
+      "tagPlaceholder": "promo, Oktober",
+      "loadingLabel": "Import läuft...",
+      "submitLabel": "Importieren",
+      "submitLabelWithCount": "{validCount} Links importieren",
+      "resultSummary": "{created} Links erstellt, {failed} fehlgeschlagen",
+      "done": "Fertig",
+      "failedRow": "Zeile {line}: {url}: {error}",
+      "openMyLinks": "Meine Links öffnen",
+      "emptyResult": "Es wurden keine Links erstellt."
+    },
+    "qr": {
+      "dialogAriaLabel": "QR-Code {shortCode}",
+      "shortCode": "/{shortCode}",
+      "copyUrlLabel": "URL kopieren",
+      "downloadLabel": "PNG herunterladen"
+    },
+    "share": {
+      "title": "Seite teilen",
+      "description": "Kopiere den Link, speichere den QR-Code oder öffne dein Profil.",
+      "urlAriaLabel": "Link der öffentlichen Seite"
+    },
+    "confirm": {
+      "typingPrompt": "Gib {requireTyping} ein, um fortzufahren"
+    },
+    "profileLinks": {
+      "emptyTitle": "Noch keine Links hier.",
+      "emptyDescription": "Dieser Kreator hat noch keine Links hinzugefügt. Schau später noch einmal vorbei.",
+      "featuredBadge": "★ Favorit",
+      "trendingBadge": "Im Trend",
+      "shortCode": "/{shortCode}"
+    }
+  },
+  "common": {
+    "copy": "Kopieren",
+    "copied": "Kopiert",
+    "failed": "Fehlgeschlagen",
+    "cancel": "Abbrechen",
+    "save": "Speichern",
+    "delete": "Löschen",
+    "confirm": "Bestätigen",
+    "processing": "Wird verarbeitet...",
+    "loading": "Wird geladen...",
+    "saving": "Wird gespeichert...",
+    "clearExpiry": "Zeitlimit entfernen",
+    "viewProfile": "Profil ansehen",
+    "downloadQr": "QR herunterladen",
+    "themes": {
+      "classic": "Classic",
+      "darkroom": "Darkroom",
+      "coral": "Coral",
+      "glass": "Glass",
+      "risoPrint": "Riso Print",
+      "peach": "Peach",
+      "lavender": "Lavender",
+      "matcha": "Matcha",
+      "sakura": "Sakura",
+      "ocean": "Ocean",
+      "sunset": "Sunset"
+    }
+  },
+  "metadata": {
+    "title": "Jejak: Ein Link, alle deine Inhalte",
+    "description": "Eine Seite für alle deine Creator-Links, inklusive Click-Analytics."
+  }
+}

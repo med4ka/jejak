@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 
 const GO_API_URL = process.env.GO_API_URL || "http://localhost:8081";
 
-// Proxy API keys -> Go (/api/keys): GET list, POST generate. Cookie sesi
-// diteruskan (generate/list WAJIB login via session — bukan API key lain).
+// Proxy API keys -> Go (/api/keys): GET list, POST generate. The session
+// cookie is forwarded (generate/list REQUIRE a session login: a different API
+// key is not accepted).
 async function proxyKeys(req, method) {
   const cookie = req.headers.get("cookie") || "";
   let body;

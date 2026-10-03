@@ -1,4 +1,7 @@
 -- +goose Up
+-- Initial schema: urls (short_code, original_url, expires_at, click_count)
+-- and click_events (per-click log with referrer and country), plus an index
+-- on each short_code column.
 -- SQL in section 'Up' is applied to the database
 
 CREATE TABLE IF NOT EXISTS urls (

@@ -4,19 +4,20 @@ import { themeStyles } from "../../../lib/themes";
 
 const GO_API_URL = process.env.GO_API_URL || "http://localhost:8081";
 
-// DESIGN.md §5 — halaman profil publik: mobile-first 1 kolom, background
-// print-white. Data diambil server-side; animasi entrance di ProfileLinks
-// (client component — framer-motion tidak bisa di server component).
-// Tema (classic|darkroom|coral) hanya mengubah pemetaan class; PRESET TERTUTUP
-// — key tak dikenal di-coerce backend ke "classic", dan themeStyles() di
-// frontend juga fallback aman sehingga tidak pernah render warna tak wajar.
+// DESIGN.md §5: public profile page: mobile-first single column,
+// print-white background. Data is fetched server-side; entrance animations live
+// in ProfileLinks (a client component: framer-motion cannot run inside a
+// server component). The theme only remaps class names; the preset set is
+// CLOSED: the backend coerces unknown keys to "classic", and themeStyles() on
+// the frontend also falls back safely, so unexpected colors are never rendered.
 function tiltFor(i) {
   return ((i * 37) % 5) - 2;
 }
 
 async function fetchProfile(username) {
-  // Fetch yang sama dipakai generateMetadata + halaman; Next.js
-  // mendedup fetch identik dalam 1 request jadi cuma 1 HTTP call.
+  // The same fetch serves both generateMetadata and the page; Next.js
+  // deduplicates identical fetches within a single request, resulting in
+  // only 1 HTTP call.
   const res = await fetch(`${GO_API_URL}/api/u/${username}`, { cache: "no-store" });
   if (res.status === 404) {
     return null;
@@ -29,7 +30,7 @@ async function fetchProfile(username) {
 
 export async function generateMetadata({ params }) {
   const fallback = {
-    title: "Profil tidak ditemukan — Jejak",
+    title: "Profil tidak ditemukan: Jejak",
     description: "Halaman kreator Jejak.",
   };
   try {
@@ -38,14 +39,17 @@ export async function generateMetadata({ params }) {
       return fallback;
     }
     const bio = (profile.bio || "").slice(0, 160);
-    const title = `${profile.display_name} (@${profile.username}) — Jejak`;
+    const title = `${profile.display_name} (@${profile.username}): Jejak`;
     const description = bio !== "" ? bio : `Link-in-bio ${profile.username} di Jejak`;
-    const images = [profile.avatar_url || "/og-default.png"];
+    // og:image / twitter:image are deliberately NOT declared here: the
+    // opengraph-image.jsx file (Next file convention, same folder) injects a
+    // per-creator 1200×630 image automatically: declaring them below as well
+    // would give crawlers 2 <meta> og:image tags (duplicates).
     return {
       title,
       description,
-      openGraph: { title, description, images, type: "profile" },
-      twitter: { card: "summary_large_image", title, description, images },
+      openGraph: { title, description, type: "profile" },
+      twitter: { card: "summary_large_image", title, description },
     };
   } catch {
     return fallback;
@@ -59,8 +63,8 @@ export default async function CreatorPage({ params }) {
   }
 
   const links = [...(profile.links || [])]
-    // Link unggulan selalu PALING ATAS (di atas urutan click_count biasa),
-    // sisanya tetap urutan lama (click tertinggi dulu).
+    // Featured links always sort to the TOP (above the regular click_count
+    // order); the rest keeps the previous ordering (highest click count first).
     .sort(
       (a, b) =>
         (b.is_featured ? 1 : 0) - (a.is_featured ? 1 : 0) ||
@@ -72,7 +76,7 @@ export default async function CreatorPage({ params }) {
 
   return (
     <main className="mx-auto w-full max-w-2xl px-4 pb-16 pt-28">
-      {/* Header profil: kartu terang + caption tulisan tangan (§3, lokasi ke-2). */}
+      {/* Profile header: bright card + handwritten caption (§3, second occurrence). */}
       <section className={`${t.radiusLarge} ${t.borderW} p-6 ${t.border} ${t.card}`}>
         <div className="flex items-center gap-4">
           {profile.avatar_url ? (
@@ -114,7 +118,11 @@ export default async function CreatorPage({ params }) {
       </section>
 
       <section className="mt-4 flex flex-col gap-4">
-        <ProfileLinks links={links} top={top} apiBase={GO_API_URL} theme={profile.theme} />
+        {/* apiBase REMOVED (redirect fix 2026-09-30): links are rendered as the
+            relative path /r/{code} so they pass through the Next proxy
+            (app/r/[code]/route.js) instead of pointing directly at GO_API_URL.
+            GO_API_URL remains in use above ONLY for server-side data fetching. */}
+        <ProfileLinks links={links} top={top} theme={profile.theme} />
       </section>
     </main>
   );

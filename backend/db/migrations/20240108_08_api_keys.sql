@@ -1,11 +1,11 @@
 -- +goose Up
 
--- API Keys untuk public API (POST /api/v1/shorten).
--- Kunci penting: key ASLI tidak pernah disimpan — hanya key_hash (SHA-256) yang
--- disimpan. Kalau database bocor, key asli tidak langsung kepakai orang lain
--- (prinsip yang sama seperti password, lihat LEARN di api/internal/auth).
--- label = nama ramah (opsional) yang ditampilkan di dashboard; last_used_at
--- di-update tiap kali key dipakai supaya user tahu key mana yang aktif.
+-- API keys for the public API (POST /api/v1/shorten).
+-- Key point: the REAL key is never stored - only key_hash (SHA-256) is
+-- stored. If the database leaks, the real key cannot be used by anyone else
+-- (the same principle as passwords, see the note in api/internal/auth).
+-- label = optional friendly name shown in the dashboard; last_used_at is
+-- updated whenever the key is used so users know which key is active.
 CREATE TABLE IF NOT EXISTS api_keys (
     id          SERIAL PRIMARY KEY,
     creator_id  INTEGER NOT NULL REFERENCES creators(id) ON DELETE CASCADE,
@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
     last_used_at TIMESTAMPTZ NULL
 );
 
--- Query "list key milik kreator" dan "cari key by hash" dipakai di tiap
--- request ke public API — hash UNIQUE sudah menyediakan index, tapi index
--- per creator dipakai saat menghapus/memvalidasi kepemilikan.
+-- The "list a creator's keys" and "find a key by hash" queries run on every
+-- public API request - the UNIQUE hash already provides an index, but the
+-- per-creator index is used when deleting a key or validating ownership.
 CREATE INDEX IF NOT EXISTS idx_api_keys_creator ON api_keys (creator_id);

@@ -1,4 +1,4 @@
-// Package auth implements simple session-based auth for Fase 9.
+// Package auth implements simple session-based auth for Phase 9.
 // Cookie carries an opaque session token; server holds token -> creator mapping.
 package auth
 
@@ -20,7 +20,7 @@ import (
 const CookieName = "jejak_session"
 
 // sessionKeyPrefix namespaces session keys in Redis (shared DB 0 with cache
-// and queue — prefix avoids collision with short-code cache entries).
+// and queue: prefix avoids collision with short-code cache entries).
 const sessionKeyPrefix = "session:"
 
 // SessionTTL bounds how long a login lasts without re-login. Same value
@@ -29,13 +29,15 @@ const SessionTTL = 7 * 24 * time.Hour
 
 var validUsername = regexp.MustCompile(`^[a-zA-Z0-9_]{3,30}$`)
 
-// ValidUsername enforces SCHEMA.md: alfanumerik + underscore, maks 30 char
-// (min 3 char supaya tidak bentrok dengan short-code 6 char yang acak).
+// ValidUsername enforces SCHEMA.md: alphanumeric + underscore, at most 30
+// chars (minimum 3 so it cannot collide with the random 6-char short code).
 func ValidUsername(u string) bool {
 	return validUsername.MatchString(u)
 }
 
-// HashPassword hashes with bcrypt (salt built-in, cost default).
+// HashPassword hashes with bcrypt (salt built-in, cost default). Returns the
+// bcrypt error when the password exceeds bcrypt's 72-byte limit or hashing
+// fails; on error the returned hash is "".
 func HashPassword(pw string) (string, error) {
 	h, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.DefaultCost)
 	if err != nil {
@@ -54,32 +56,44 @@ func CheckPassword(hash, pw string) bool {
 // production path) and in-memory (baseline without Redis). Handler depends
 // only on this interface so backends are swappable without touching routes.
 type Store interface {
+	// Create mints a new session token bound to creatorID (SessionTTL
+	// expiry). Returns an error when the token cannot be generated or
+	// stored; then no session exists and login/registration must fail.
 	Create(creatorID int64) (string, error)
+	// Get resolves a token to its creator. Missing, expired, or unreadable
+	// sessions all return false - never an error path.
 	Get(token string) (int64, bool)
+	// Delete revokes one session (logout); a missing token is not an error.
 	Delete(token string)
+	// DeleteAllForUser revokes ALL sessions belonging to creatorID (logout-all,
+	// account deletion): keepToken is excluded (""): password change uses this
+	// to kick OTHER devices without logging out the device in use (its cookie
+	// token is passed as keepToken). Returns the number of sessions removed.
+	// No error: a session that does not exist is not a failure.
+	DeleteAllForUser(creatorID int64, keepToken string) (int, error)
 }
 
-// LEARN:
-//   Kenapa: Session store Redis-backed (bukan in-memory): SEMUA instance API
-//   di belakang load balancer membaca/menulis sesi yang SAMA, jadi login di
-//   instance A tetap dikenal instance B (round-robin tidak lagi me-logout
-//   user), dan sesi selamat dari restart server. Revoke tetap instan (DEL key
-//   langsung) — keunggulan session-based atas JWT yang dipertahankan. TTL
-//   native Redis (EX 7 hari) = expiry otomatis tanpa sweeper + cookie MaxAge
-//   disamakan supaya keduanya lapse bersama.
-//   Trade-off: Redis jadi dependensi keras untuk auth — Redis mati = login,
-//   register (auto-login), logout, DAN setiap baca sesi ikut gagal. Tiap
-//   request ber-auth tambah 1 RTT network ke Redis. Data sesi melintasi
-//   network (di DC sendiri, acceptable; jangan expose Redis ke publik).
-//   Alternatif: JWT stateless (tanpa store, scaling trivial) tapi revoke
-//   tidak instan — butuh blocklist yang ujung-ujungnya state lagi.
+// RedisStore is a session store backed by Redis, shared by all API instances.
+// Rationale: Redis-backed rather than in-memory: EVERY API instance behind
+// the load balancer reads and writes the SAME sessions, so a login on
+// instance A is still recognized by instance B (round-robin no longer logs
+// users out) and sessions survive server restarts. Revocation stays instant
+// (DEL on the key): the advantage over JWT that is deliberately kept. Native
+// Redis TTL (EX 7 days) gives automatic expiry with no sweeper, and the cookie
+// MaxAge is matched so both lapse together.
+// Trade-off: Redis becomes a hard dependency for auth: if Redis is down,
+// login, register (auto-login), logout, AND every session read fail as well.
+// Each authenticated request adds 1 network RTT to Redis, and session data
+// crosses the network (acceptable within one's own DC; do not expose Redis to
+// the public). Alternative: stateless JWT (no store, trivial scaling) but
+// revocation is not instant: it requires a blocklist, which is state again.
 type RedisStore struct {
 	client *redis.Client
 	ctx    context.Context
 }
 
 // NewRedisStore creates a session store on top of an existing Redis client
-// (shared with cache + queue — 1 pool koneksi, key dipisah via prefix).
+// (shared with cache + queue: one connection pool, keys separated by prefix).
 func NewRedisStore(client *redis.Client) *RedisStore {
 	return &RedisStore{client: client, ctx: context.Background()}
 }
@@ -100,6 +114,9 @@ func mintToken() (string, error) {
 }
 
 // Create mints a random token bound to creatorID with SessionTTL expiry.
+// Returns the rand error when the OS entropy source fails, or the Redis
+// error when SET fails; in both cases no session exists and the caller's
+// login/registration request must fail.
 func (s *RedisStore) Create(creatorID int64) (string, error) {
 	token, err := mintToken()
 	if err != nil {
@@ -111,24 +128,23 @@ func (s *RedisStore) Create(creatorID int64) (string, error) {
 	return token, nil
 }
 
-// LEARN:
-//   Kenapa sliding-expiry, bukan fixed-expiry: fixed 7 hari dari login berarti
-//   user yang aktif tiap hari tetap ditendang tepat hari ke-7 (pengalaman
-//   buruk yang tidak ada hubungannya dengan keamanan). Sliding menghitung
-//   ulang 7 hari dari request authed TERAKHIR — selama user aktif, sesi hidup
-//   terus; hanya user yang benar-benar hilang 7 hari penuh yang login ulang.
-//   Itu sebabnya produk consumer (FB/IG/dst) pakai sliding: mengurangi friksi
-//   login ulang tanpa memperpanjang jendela sesi yang sudah ditinggalkan
-//   (token curian yang tidak dipakai tetap mati sesuai TTL terakhir).
-//   Trade-off: Tiap Get sukses = 1 write EXPIRE ekstra (GET+EXPIRE, bukan GET
-//   saja). Jendela eksposur token curian ikut memanjang selama dipakai penyerang
-//   — mitigasinya revoke instan (Delete), bukan expiry.
-//   Alternatif: Refresh periodik (mis. hanya kalau sisa TTL < 1 hari) untuk
-//   hemat write — optimasi yang valid kalau traffic auth tinggi.
 // Get returns the creator bound to token, or false when missing/expired
 // (Redis auto-deletes expired keys; redis.Nil maps to "no session").
 // On success the TTL slides: EXPIRE resets to SessionTTL from NOW (no re-create,
 // value untouched). Best-effort: EXPIRE failure doesn't fail auth.
+// Rationale for sliding rather than fixed expiry: a fixed 7 days from login
+// would still kick out a user who is active every day, exactly on day 7 (a
+// poor experience with no security benefit). Sliding recomputes 7 days from
+// the LAST authenticated request: while the user stays active the session
+// lives on, and only a user truly gone for a full 7 days must log in again.
+// That is why consumer products (FB/IG etc.) use sliding: it reduces re-login
+// friction without extending the window of an abandoned session (a stolen
+// token that is never used still dies on its last TTL).
+// Trade-off: every successful Get costs 1 extra EXPIRE write (GET+EXPIRE,
+// not GET alone), and the exposure window of a stolen token stretches while
+// an attacker uses it: mitigation is instant revocation (Delete), not
+// expiry. Alternative: periodic refresh (e.g. only when remaining TTL < 1 day)
+// to save writes: a valid optimization if authenticated traffic is high.
 func (s *RedisStore) Get(token string) (int64, bool) {
 	if token == "" {
 		return 0, false
@@ -153,6 +169,56 @@ func (s *RedisStore) Delete(token string) {
 	s.client.Del(s.ctx, sessionKey(token))
 }
 
+// DeleteAllForUser revokes all of creatorID's sessions except keepToken (""
+// = no exception). Redis has no "sessions per user" index (the value stores
+// creatorID as a string and the key is the token), so scanning session:* and
+// GETting each key is the only route without a new schema. SCAN (not KEYS) so
+// Redis is never blocked on a large keyspace; one pass in batches of 128 keys
+// because sessions per user are few (1 per logged-in device, 7-day TTL), so a
+// long scan is not a risk.
+// Returns the SCAN error when the scan fails (nothing deleted yet), or the
+// DEL error when the bulk delete fails (sessions found before that point may
+// already be gone); a key that expires between SCAN and GET is skipped, not
+// an error. 0 with a nil error means there was nothing to revoke.
+func (s *RedisStore) DeleteAllForUser(creatorID int64, keepToken string) (int, error) {
+	want := strconv.FormatInt(creatorID, 10)
+	keep := ""
+	if keepToken != "" {
+		keep = sessionKey(keepToken)
+	}
+	var toDelete []string
+	var cursor uint64
+	for {
+		keys, next, err := s.client.Scan(s.ctx, cursor, sessionKeyPrefix+"*", 128).Result()
+		if err != nil {
+			return 0, err
+		}
+		for _, k := range keys {
+			if k == keep {
+				continue
+			}
+			val, err := s.client.Get(s.ctx, k).Result()
+			if err != nil {
+				continue // key expired between SCAN and GET: not a failure
+			}
+			if val == want {
+				toDelete = append(toDelete, k)
+			}
+		}
+		cursor = next
+		if cursor == 0 {
+			break
+		}
+	}
+	if len(toDelete) == 0 {
+		return 0, nil
+	}
+	if err := s.client.Del(s.ctx, toDelete...).Err(); err != nil {
+		return 0, err
+	}
+	return len(toDelete), nil
+}
+
 // Session is one in-memory login: which creator, until when.
 type Session struct {
 	CreatorID int64
@@ -161,7 +227,7 @@ type Session struct {
 
 // MemoryStore is the in-memory fallback for baseline mode (no Redis, single
 // instance only). Same methods as RedisStore so handler code is identical.
-// JANGAN dipakai di belakang load balancer: tiap instance punya map sendiri.
+// Do NOT use it behind a load balancer: every instance has its own map.
 type MemoryStore struct {
 	mu       sync.Mutex
 	sessions map[string]Session
@@ -173,6 +239,8 @@ func NewMemoryStore() *MemoryStore {
 }
 
 // Create mints a random token bound to creatorID with SessionTTL expiry.
+// Returns the rand error when the OS entropy source fails; the in-memory
+// map itself never fails.
 func (s *MemoryStore) Create(creatorID int64) (string, error) {
 	token, err := mintToken()
 	if err != nil {
@@ -197,7 +265,7 @@ func (s *MemoryStore) Get(token string) (int64, bool) {
 		delete(s.sessions, token)
 		return 0, false
 	}
-	// Sliding juga di sini supaya perilaku baseline identik dengan Redis.
+	// Sliding here as well, so baseline behavior is identical to Redis.
 	s.sessions[token] = Session{CreatorID: sess.CreatorID, ExpiresAt: time.Now().Add(SessionTTL)}
 	return sess.CreatorID, true
 }
@@ -209,26 +277,68 @@ func (s *MemoryStore) Delete(token string) {
 	s.mu.Unlock()
 }
 
-// SetCookie writes the session cookie: HttpOnly, Path=/, SameSite=Lax.
-// Secure flag sengaja tidak di-set karena dev lokal jalan di http.
+// DeleteAllForUser revokes all of creatorID's sessions except keepToken:
+// behavior identical to RedisStore (see the rationale there); only the scan
+// mechanism differs (local map iteration). It never returns an error (the
+// map cannot fail); the count is the number of sessions actually removed.
+func (s *MemoryStore) DeleteAllForUser(creatorID int64, keepToken string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	removed := 0
+	for tok, sess := range s.sessions {
+		if sess.CreatorID != creatorID || tok == keepToken {
+			continue
+		}
+		delete(s.sessions, tok)
+		removed++
+	}
+	return removed, nil
+}
+
+// SecureCookies controls the Secure attribute on session cookies (G124):
+// Secure keeps the cookie off plain-HTTP responses, so it cannot leak through
+// a sniffed request. It stays false by default because local development runs
+// on plain http (a Secure cookie would never be sent back and login would
+// appear broken); production must set COOKIE_SECURE=true behind TLS. Wired
+// once at startup from main, not per request.
+var SecureCookies bool
+
+// SetCookie writes the session cookie: HttpOnly, Path=/, SameSite=Lax, and
+// Secure when SecureCookies is enabled (COOKIE_SECURE=true in production).
 func SetCookie(w http.ResponseWriter, token string) {
+	// #nosec G124 -- the Secure attribute is set from SecureCookies
+	// (COOKIE_SECURE env, see the var's doc): it cannot be a literal true
+	// because plain-http localhost development would then never receive the
+	// cookie back; production must set COOKIE_SECURE=true behind TLS.
 	http.SetCookie(w, &http.Cookie{
 		Name:     CookieName,
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
+		// Secure comes from SecureCookies (COOKIE_SECURE env): it cannot be
+		// a literal true because plain-http localhost development would then
+		// never receive the cookie back; production must set
+		// COOKIE_SECURE=true behind TLS.
+		Secure:   SecureCookies, // #nosec G124 -- gated by COOKIE_SECURE (see above)
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int((SessionTTL).Seconds()),
 	})
 }
 
-// ClearCookie removes the session cookie client-side (server also deletes).
+// ClearCookie removes the session cookie client-side (server also deletes);
+// it mirrors SetCookie's attributes so the browser actually matches and
+// drops the original cookie.
 func ClearCookie(w http.ResponseWriter) {
+	// #nosec G124 -- mirrors SetCookie: Secure comes from SecureCookies
+	// (COOKIE_SECURE env) so the clearing cookie matches the issued one.
 	http.SetCookie(w, &http.Cookie{
 		Name:     CookieName,
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		// Mirrors SetCookie's Secure so the clearing cookie matches the one
+		// that was issued (COOKIE_SECURE env).
+		Secure:   SecureCookies, // #nosec G124 -- gated by COOKIE_SECURE (see SetCookie)
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 	})
