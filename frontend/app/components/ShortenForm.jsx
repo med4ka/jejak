@@ -6,6 +6,7 @@ import SubmitButton from "./SubmitButton";
 import CopyButton from "./CopyButton";
 import { fromInputValue, minInputValue } from "../../lib/expiry";
 import { sameOriginShortUrl } from "../../lib/shortlink";
+import { detectEcommerce } from "../../lib/deeplink";
 import { useTranslation } from "../../lib/I18nProvider";
 
 // Reusable shorten form (extracted from the homepage during the phase A
@@ -27,6 +28,10 @@ export default function ShortenForm({ st, onSuccess }) {
   // time; it is sent as ISO UTC (fromInputValue): the backend stores pure
   // UTC.
   const [expiresAt, setExpiresAt] = useState("");
+  // Optional password (link protection): empty = no password. The backend
+  // rule is 4-72 chars (also mirrored by minLength/maxLength below, which
+  // apply only when the field is non-empty: the field is not `required`).
+  const [password, setPassword] = useState("");
   const [shortUrl, setShortUrl] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -59,6 +64,9 @@ export default function ShortenForm({ st, onSuccess }) {
           tags,
           // local → UTC; empty means no expiry (the field is omitted entirely).
           expires_at: fromInputValue(expiresAt) || undefined,
+          // Omitted entirely when empty: the backend only hashes a non-empty
+          // password (bcrypt, 4-72 chars).
+          password: password !== "" ? password : undefined,
         }),
       });
       const data = await res.json();
@@ -74,6 +82,9 @@ export default function ShortenForm({ st, onSuccess }) {
       // proxy rather than the backend directly (public-page redirect fix,
       // 2026-09-30).
       setShortUrl(sameOriginShortUrl(data.shortUrl, null));
+      // The password is write-only (only a bcrypt hash reaches the DB): drop
+      // it from the form right after a successful shorten.
+      setPassword("");
       // Track anonymous links for later claiming: ONLY while logged out.
       // Logged-in users are assigned the link server-side, so no tracking is
       // needed. Capped at the 50 most recent entries (oldest dropped);
@@ -102,6 +113,12 @@ export default function ShortenForm({ st, onSuccess }) {
       setLoading(false);
     }
   }
+
+  // Instant e-commerce verdict while typing (deep link feature): shows the
+  // platform badge the moment a Shopee/Tokopedia/... URL lands in the field.
+  // Copy is intentionally hard-coded Indonesian (like EditLinkModal): the
+  // i18n dictionaries were off-limits for this task.
+  const detected = detectEcommerce(url);
 
   return (
     <>
@@ -163,10 +180,35 @@ export default function ShortenForm({ st, onSuccess }) {
             </button>
           )}
         </div>
+        {/* Optional password (link protection): visitors see a password
+            form before the redirect. Omitted when empty; 4-72 chars. */}
+        <input
+          type="password"
+          aria-label="Password link (opsional)"
+          placeholder="Password link (opsional, 4-72 karakter)"
+          autoComplete="new-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          minLength={4}
+          maxLength={72}
+          className={inputThemed}
+        />
         <p className={`text-xs ${st.textMuted}`}>
           {t("forms.shorten.helperText")}
         </p>
       </form>
+
+      {/* Deep link badge: rendered as soon as the typed URL matches a
+          supported platform (mirrors what the redirect handler will do on
+          mobile: open the merchant app first, web as fallback). */}
+      {detected && !shortUrl && (
+        <div
+          role="status"
+          className={`${st.radius} ${st.borderW} ${st.border} ${st.accent} px-4 py-2.5 text-sm font-bold`}
+        >
+          🛍️ {detected.name} terdeteksi — link akan buka app di HP
+        </div>
+      )}
 
       {error !== "" && (
         <div className={`${st.radius} ${st.borderW} ${st.border} ${st.card} px-4 py-2.5 text-sm font-medium ${st.text}`}>

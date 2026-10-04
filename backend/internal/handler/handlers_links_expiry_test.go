@@ -107,7 +107,7 @@ func TestHandleShortenExpiryValidation(t *testing.T) {
 func TestHandleUpdateLinkExpiry(t *testing.T) {
 	t.Run("set future value", func(t *testing.T) {
 		s := &fakeStore{}
-		s.CreateURL("mylink", "https://example.com", ptrInt64(7), "[]", nil)
+		s.CreateURL("mylink", "https://example.com", ptrInt64(7), "[]", nil, "")
 		h := newAuthedLinkHandler(s)
 		future := time.Now().UTC().Add(48 * time.Hour).Format(time.RFC3339)
 		rr := httptest.NewRecorder()
@@ -122,7 +122,7 @@ func TestHandleUpdateLinkExpiry(t *testing.T) {
 
 	t.Run("null clears expiry", func(t *testing.T) {
 		s := &fakeStore{}
-		s.CreateURL("mylink", "https://example.com", ptrInt64(7), "[]", nil)
+		s.CreateURL("mylink", "https://example.com", ptrInt64(7), "[]", nil, "")
 		h := newAuthedLinkHandler(s)
 		rr := httptest.NewRecorder()
 		h.HandleUpdateLink("mylink", rr, authedPut(s, h, 7, "/api/links/mylink", `{"expires_at":null}`))
@@ -136,7 +136,7 @@ func TestHandleUpdateLinkExpiry(t *testing.T) {
 
 	t.Run("past value -> 422 untouched", func(t *testing.T) {
 		s := &fakeStore{}
-		s.CreateURL("mylink", "https://example.com", ptrInt64(7), "[]", nil)
+		s.CreateURL("mylink", "https://example.com", ptrInt64(7), "[]", nil, "")
 		h := newAuthedLinkHandler(s)
 		rr := httptest.NewRecorder()
 		h.HandleUpdateLink("mylink", rr, authedPut(s, h, 7, "/api/links/mylink",
@@ -154,7 +154,7 @@ func TestHandleUpdateLinkExpiry(t *testing.T) {
 
 	t.Run("malformed -> 400", func(t *testing.T) {
 		s := &fakeStore{}
-		s.CreateURL("mylink", "https://example.com", ptrInt64(7), "[]", nil)
+		s.CreateURL("mylink", "https://example.com", ptrInt64(7), "[]", nil, "")
 		h := newAuthedLinkHandler(s)
 		rr := httptest.NewRecorder()
 		h.HandleUpdateLink("mylink", rr, authedPut(s, h, 7, "/api/links/mylink", `{"expires_at":123}`))

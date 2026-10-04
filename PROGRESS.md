@@ -11,6 +11,130 @@ Append-only log. Jangan hapus entry lama.
 
 ---
 
+## 2026-10-04: Link health monitor + password protection
+**Status:** Done (2 fitur; **migration 17** auto-applied; build **41 routes hijau** (2×), smoke **12/12**, `gofmt`/`go vet`/`go test ./...` semua ok, `gosec` **0** (excl G104), E2E penuh lewat **:8082 dan proxy :3000**, worker batch live **50 link/1m8s**, 7 screenshot terverifikasi)
+
+**Migration `20261004_17_link_health_password.sql` (+ `.down.sql`, 9 statement):** kolom `urls` — `health_status` (DEFAULT 'unknown'), `last_health_check`, `fallback_url`, `health_notified_at`, `password_hash` — + index parsial `idx_urls_health_due` (`WHERE is_active AND health_status <> ''`), `idx_urls_health_broken`; tabel **`notifications`** (creator FK CASCADE, `read`, `created_at DESC` index partisi per creator). Konvensi: `-- +goose Down` hanya di `.down.sql` terpisah; file `.down` ikut terekam sbg migrasi **0-statement** (identik 13 pasang sebelumnya).
+
+**Health monitor (`backend/internal/health/health.go` + test):**
+- `CheckURL`: **HEAD** (UA `Jejak-HealthCheck/1.0`, timeout 5s, maks 3 redirect → `ErrUseLastResponse`), 405/501 → retry **GET sekali**; 2xx/3xx `healthy`, 4xx/5xx `broken`, transport error → `timeout`. Body di-drain 4096.
+- `Checker.CheckOne`: **policy notifikasi** — `broken && health_notified_at==NULL && CreatorID!=nil` → 1 notif in-app (`link_broken`, pesan + tujuan dipotong 80 char) + marker disimpan; `healthy` → marker di-reset (breakage berikutnya notif lagi); **persist SEBELUM insert notif** (at-most-once); anonim → marker tetap nil (notif menyusul setelah ClaimLinks). Cache redirect **di-evict hanya saat status BERUBAH**.
+- `RunBatch`: ambil ≤50 link `ORDER BY last_health_check NULLS FIRST, id`, spacing **1.2s** (budget 50 req/menit), baris gagal di-skip.
+- **Worker** `cmd/worker/health.go`: boot **langsung run** + ticker **6 jam**, log `health batch: N link dicek dalam Xs` (bukti live: `50 link dicek dalam 1m8.796s`); lock = worker lock Redis yang sama (single instance).
+- **Trigger manual** `POST /api/links/{short_code}/check-health` (auth → **ownership dulu, 404 utk kode orang (anti-SSRF abuse)** → limiter **10/menit/IP** (Record setelah ownership) → `CheckOne` → JSON `{short_code, health_status, last_health_check}`).
+- **Gate di redirect** (`handlers_links.go`, urutan: **password → health → logClick → redirect**; kedua gate sebelum click = hit gagal **bukan** click): `broken` saja yg digate — + `fallback_url` → **interstitial 200** (banner "Link ini dialihkan…", meta refresh 1s, link manual); tanpa fallback → **503** + `Retry-After: 21600`. `timeout`/`healthy`/`unknown` tetap 302 normal. Payload cache bertambah `password_hash/health_status(broken only)/fallback_url` (omitempty).
+
+**Password protection (`handlers_password.go` + test):**
+- Create/edit: field `password` 4–72 char (400 field error) → **bcrypt cost 10** (`auth.HashPassword`); PUT `nil`=keep, `""`=hapus, value=ganti (tanpa auto-clear; validasi URL fallback via `validRemoteURL`).
+- **Gate**: form 200 neo-brutal (tombol "Buka link", `autocomplete=off`) sebelum semua gate lain; gagal → PRG **303 `/r/{code}?e=1`** + pesan inline (tanpa cookie, tanpa click); sukses → cookie **`jejak_link_access_{code}` = hex SHA-256 dari bcrypt hash** (bukan hash-nya: bcrypt base64 mengandung `/` = bukan cookie-octet), `HttpOnly`, `Path=/r/`, `Max-Age=3600`, `SameSite=Lax`, `Secure` = `COOKIE_SECURE || TLS` (`#nosec G124` utk gosec); ganti password → digest berubah → cookie lama otomatis mati.
+- **Limiter verify 10/menit/IP+code**: gagal `Record`, sukses `Reset` (typo tak menghukum); lewat limit → 429 + form "Terlalu banyak percobaan…".
+- Handler baru: `HandlePasswordVerify`, `VerifyLimiterReset`, `serveHealthGate`, `writePasswordForm/writeHealthFallbackHTML/writeHealthProblemHTML`, `accessDigest/passwordVerified/passwordErrorFromQuery`; route `POST /r/{short_code}/verify` (public).
+
+**Notifications:** `GET /api/notifications` → `{notifications:[50 terbaru], unread}` (owner), `PUT /api/notifications/{id}/read` (owner-scoped, foreign → 404) — di primary/shard0 (catatan di kode: creators selalu primary). Frontend **`NotificationsBell.jsx`**: badge hitung (9+) fetch saat mount, dropdown lazy-load + "Muat ulang", mark-read optimistik (rollback bila gagal), tampil di navbar desktop (sebelum LanguageSwitcher) + mobile drawer (varian `drawer`).
+
+**Frontend lain:** `ShortenForm` — input password opsional (`minLength=4 maxLength=72`, di-drop dari state setelah sukses); `EditLinkModal` — blok **"Kesehatan: {label}" + tombol "Cek sekarang"** (POST check-health, tanpa `onSaved` agar draft tak ter-reset), kontrol password existing ("Kosongkan untuk tetap, isi untuk ganti" + "Hapus password"/"Batal", kirim hanya bila berubah), field **Fallback URL** + helper "Kalau link utama rusak, user akan diarahkan ke URL ini."; `DashboardClient` — **`healthBadge`** (broken=coral "Broken", timeout=kuning "Timeout", healthy/unknown = **tanpa badge** [noise policy]) + **🔒** utk `has_password`, mengalir inline setelah expiryBadge.
+**Proxy baru** `app/api/notifications/route.js` (GET), `app/api/notifications/[id]/read/route.js` (PUT), `app/api/links/[short_code]/check-health/route.js` (POST) — semua teruskan cookie; **FIX** `app/r/[code]/route.js`: (a) **query string diteruskan** (`?e=1` sempat dibuang → pesan "Password salah" hilang di :3000), (b) **5xx HTML** (halaman 503 health dari backend) diteruskan apa adanya + `Retry-After` (plain-text 5xx tetap fallback ramah); **BARU** `app/r/[code]/verify/route.js` (POST — tanpa ini unlock password 404 di origin Next).
+
+**Verifikasi E2E:** lewat **:8082** — form 200 → wrong 303 `?e=1` (inline error) → right 303 + Set-Cookie digest (64 hex, HttpOnly, Path=/r/) → 302 destination ✓; PUT `password:""` → 302 tanpa cookie ✓; broken+fallback → interstitial (meta refresh + banner) ✓; fallback dibersihkan → **503 + Retry-After: 21600** ✓; check-health `localhost:9` → `timeout` (redirect normal ✓), self-404 → `broken` ✓; notifikasi `{unread:1}` → mark-read → `0` ✓; rate limit 11× → `200×10, 429` ✓. Lewat **:3000** — form, `?e=1` error, verify 303 + cookie, interstitial, 503 passthrough semuanya ✓. Link gate: `ssppqC` (broken) klik = **0** (tak dihitung), `yhtWJi` (timeout) = 1 ✓. **Worker live**: lock + boot batch 50 link + klik queue ter-drain ✓.
+
+**Screenshot** (`%TEMP%\opencode\jejak-health-shots\`, dimensi diverifikasi): `1-password-form` (1280×900), `2-fallback-interstitial` (1280×900, budget 700ms — meta refresh 1s membuat chrome hang bila budget lebih), `3-503-page`, `4-dashboard-badges` (tab Link Saya: Broken/Timeout/🔒/tanpa-badge utk healthy + bell "58"), `5-bell-open` (feed + timestamp), `6-edit-modal` (Kesehatan: rusak + Cek sekarang + Password baru + Fallback URL terisi), `7-landing-shorten` (1280×1500, field password di hero). Shot login via **CDP** (`--remote-debugging-port` + `Runtime.evaluate`: login fetch → klik tab/bell/Edit).
+
+**Deviasi / TODO:** (1) **Tidak ada infra email/SMS** → notifikasi **in-app saja** (keputusan: sesuai scope; email = TODO bila infra ada). (2) Budget rate manual (10/menit/IP) + worker (50/jam) **tak koordinasi global** — deviasi terdokumentasi, cukup utk deployment single-instance. (3) Batch pertama worker memicu **~58 notifikasi** utk link uji lama (semua first-breakage, kebijakan by design; dashboard jadi demo bagus utk bell). (4) PUT password/fallback **tak evict cache** → jendela 300s status lama (diterima; health-check evict saat status berubah). (5) Teks UI baru **hardcode Bahasa Indonesia** (`messages/*.json` tak disentuh, sesuai batasan task). (6) Smoke test butuh `BASE_URL=http://localhost:8082` (default 8081 = XAMPP). (7) Judul browser/kartu health badge memakai teks literal "Broken"/"Timeout" (bukan i18n). (8) `redis-cli` tak tersedia di mesin (verifikasi queue via perilaku worker + click_count).
+
+## 2026-10-04: Deep link e-commerce + WhatsApp builder
+**Status:** Done (2 fitur; **6 platform e-commerce**; build **34 routes hijau**, smoke **12/12**, unit 27/27 test case, E2E interstitial/mobile/desktop/analytics terverifikasi)
+
+**Endpoint baru:**
+- `POST /api/deeplink/generate` — `{url}` → `{original_url, platform, deep_link, web_fallback, note}`; non-e-commerce → **404**; `javascript:`/invalid → 400. Tanpa auth + tanpa rate limit (pure parse, nol side effect).
+- `POST /api/tools/whatsapp-link` — `{phone, message?, shorten?}` → `{wa_link, short_url?}`; normalisasi nomor (`0812…`/`+62812…`/`62812…`/`812…` → `62812…`, tolak <10/>15 digit & non-digit), pesan maks 500 rune (400 field error), `shorten` default **true**; path shorten memakai **bucket rate limit yang sama** dengan `/api/shorten` (30/menit/IP: tak bisa dilipatgandakan) dan `OptionalAuth` → link milik user login.
+
+**Platform e-commerce didukung (deep link `internal/deeplink`):**
+| Platform | Domain | App scheme |
+|---|---|---|
+| Shopee | shopee.co.id + sg/my/th/vn/com.tw | `shopeeid://product/{shopid}/{itemid}` (modern `/product/a/b` + legacy `-i.a.b`); path lain → `shopeeid://` (app root) |
+| Tokopedia | tokopedia.com | `tokopedia://product/…` + root fallback |
+| TikTok Shop | tiktok.com | **web-only** (m.tiktok.com sudah universal-link auto-buka app; scheme root justru membuka app HOME = downgrade) |
+| Lazada | lazada.co.id / lazada.com | `lazada://` (app root) |
+| Blibli | blibli.com | `blibli://` (app root) |
+| Bukalapak | bukalapak.com | `bukalapak://` (app root) |
+
+**Redirect `GET /r/{code}` (handlers_links.go):** `respondRedirect` — **mobile** (iPhone/iPad/Android) **+** non-bot **+** scheme non-kosong → **interstitial 200** dgn script app-first: hidden **iframe** coba buka scheme (nav top-frame ke scheme tak terdaftar = Chrome `ERR_UNKNOWN_URL_SCHEME` → fallback tak jalan; iframe gagal = diam), **`visibilitychange`** batal fallback saat app kebuka, **1.5s** → `location.replace(webFallback)`, tombol manual "Buka di web", `noindex` + `json.Marshal` (escape `<`→`\u003c`) utk anti-`</script>`; selain itu **302 biasa**. Desktop/bot/link biasa tak berubah. Click **tetap tercatat sebelum cabang** (verified: `click_events` = mobile+desktop+bot rows, `click_count` naik).
+
+**File baru:** `backend/internal/deeplink/deeplink.go` (+`deeplink_test.go`, 19 deteksi case: suffix-safe host — `shopee.co.id.evil.com` **ditolak**, vs spek `strings.Contains` yg bocor), `backend/internal/handler/handlers_tools.go` (+`handlers_tools_test.go`: NormalizePhone 15 case, WhatsApp 5 test, generate 3 test), `frontend/lib/deeplink.js` (mirror deteksi utk badge; 12/12 node test), `frontend/app/components/WhatsAppTool.jsx`, `frontend/app/tools/whatsapp/page.jsx` (+prefill `?phone=&message=`), `frontend/app/api/tools/whatsapp-link/route.js`, `frontend/app/api/deeplink/generate/route.js` (proxy pola `/api/shorten`).
+
+**File diubah:** `backend/cmd/server/main.go:196` (register 2 route), `backend/internal/handler/handlers_links.go` (import deeplink/html; `respondRedirect` + `writeDeepLinkHTML`; **3 call site** `http.Redirect` → `respondRedirect`), `frontend/app/components/ShortenForm.jsx` (badge 🛍️ "{Platform} terdeteksi — link akan buka app di HP" via `detectEcommerce`, muncul saat URL cocok), `frontend/app/components/EditLinkModal.jsx` (status read-only "Deep link: aktif/mati" — **toggle per-link ditunda**: butuh kolom DB baru = migration, sesuai kebijakan).
+
+**Verifikasi:** E2E: interstitial iPhone → 200 HTML (scheme+fallback+web URL benar), desktop → 302, link biasa mobile → 302, bot mobile → 302 — lewat **:8082 dan proxy :3000** ✓; whatsapp: `08123456789`→`wa.me/628123456789`, pesan `Halo%2C%20saya…` (`%20` bukan `+`), `shorten:false` → tanpa `short_url`, 400 phone/message ✓; generate: 4 platform OK + non-ecom 404 ✓. `go build/vet` 0, gofmt bersih, **gosec 0** (exclude G104), `go test ./...` all ok, `npm run build` **34 routes** (+3), deteksi frontend 12/12, dev.log bersih.
+
+**Screenshot:** `C:\Users\akbar\AppData\Local\Temp\opencode\jejak-wa-shots\1-whatsapp-builder-desktop.png` (+`2-whatsapp-builder-mobile-375.png`, `3-contact-375-REFERENSI-LAMA.png` — potongan kanan shot 375 = artifact Chrome headless min-window-width, **identik utk halaman lama /contact**: bukan regresi).
+
+**TODO / catatan:** (1) Tidak ada platform yg butuh **API key** — semua deep link = public app URL scheme. (2) Tombol "Ubah ke link biasa" (ShortenForm) & toggle aktif/mati (EditLinkModal) ditunda: perlu kolom `deep_link_enabled` baru → migration file + flag review dulu. (3) Teks UI baru hardcode Bahasa Indonesia (file `messages/*.json` tak disentuh, sesuai batasan task). (4) Format legacy product Tokopedia dipakai pola `-i.{a}.{b}` (sama Shopee); kalau meleset → fallback web tetap aman.
+
+## 2026-10-04: Auto-detect brand icon di link
+**Status:** Done (file baru `frontend/lib/brands.js` — **60 brand / 35 ikon lucide**; kartu link di /u/[username] kini punya icon box 32/40px dgn warna brand; build **31 routes hijau**, smoke **12/12**, deteksi 14/14 test case, 11 tema lolos loop verifikasi, 4 screenshot bukti)
+
+**File dibuat/diubah:**
+- **`frontend/lib/brands.js` (baru)** — registry brand + renderer helpers:
+  - `BRANDS` (**60 domain**): e-commerce ID (Shopee×5 domain, Tokopedia, Lazada, Bukalapak, Blibli, Amazon×2, Etsy), social (IG, TikTok, Twitter/X, Facebook, Threads, LinkedIn, Pinterest, Reddit, Snapchat, Dribbble, Behance), video/music (YouTube×2, Vimeo, Spotify, SoundCloud, Twitch, Netflix), messaging (WhatsApp×2, Telegram×2, LINE, Discord×2, Slack, Zoom), dev (GitHub, GitLab, StackOverflow, DEV, Figma, Steam×2), blog/docs (Medium, Substack, Notion, Google Docs/Drive, Dropbox, Google, Apple, Quora, Canva), link-in-bio (Linktree, Beacons, Bio.link). 20 brand ditambahkan di luar daftar awal prompt (Shopee SG/MY/TH, Blibli, Amazon, Etsy, Dribbble, Behance, Netflix, Slack, Zoom, DEV, Figma, Steam, Dropbox, Google, Apple, Quora, Canva, dll).
+  - `detectBrand(url)`: exact → root 2-label (`mail.google.com`→`google.com`) → fallback `{name:"Link", color:"#1C1A12", icon:"link"}`; URL rusak → fallback.
+  - `luminance/isBrightColor/isDarkColor/rgba` + `ICON_MAP` (35 component; diverifikasi ada di lucide-react ^0.469 — termasuk `AtSign` utk Threads yang terlewat di spek).
+- **`frontend/app/components/ProfileLinks.jsx`** — kartu link kini flex row **gap-3**: icon box (`w-8 h-8 md:w-10 md:w-10`, `rounded-[8px]`, border) + kolom konten (URL row + slug row **spacing lama dipertahankan**: pt-4/pb-3, truncate/badge/count identik). Rendering warna 3 kasus (inline style):
+  1. **normal**: `bg = brand 20%`, `border = brand 55%`, ikon = brand color;
+  2. **terang** (lum>0.65, mis Snapchat #FFFC00): bg **solid** + ikon gelap `#1C1A12`;
+  3. **gelap** (lum<0.10, mis X/GitHub #000000): bg solid + ikon **putih** + rim `rgba(255,255,255,.25)` → box tetap terpisah di darkroom;
+  - **fallback tak dikenal**: token `ts.accent` tema (bg solid konsisten dgn badge Unggulan — token hex accent tak tersedia utk 4 tema lama, jadi `/20` mustahil tanpa menyentuh themes.js yang dilarang).
+  - Hover icon box: `whileHover scale 1.05` framer spring (stiffness 400, damping 17); `aria-hidden`; svg `h-4 w-4 md:h-5 md:w-5`.
+
+**Verifikasi:**
+- **Deteksi**: 14/14 test case node (exact/subdomain/root/fallback/invalid URL) ✓; semua `icon` terpetakan (validasi runtime: 0 missing).
+- **Render server**: `GET /u/next16test8681` → 8/8 icon box + svg; inline style benar: Shopee `rgba(238,77,45,.2)/#EE4D2D`, IG `#E1306C`, YouTube `#FF0000`, WhatsApp `#25D366`; GitHub (gelap) → `#181717` solid + `#FFFFFF`; unknown-domain → `bg-flash-yellow text-ink` (accent classic) ✓.
+- **11 tema**: loop PUT theme → GET → assert (fallback accent berubah per tema + tint brand konstan) = **11/11 OK**; theme user dikembalikan ke classic.
+- **Screenshot** (Chrome headless, `%TEMP%\opencode\jejak-brand-shots\`): `1-desktop-classic-brand.png`, `2-mobile-375-classic.png`, `3-desktop-darkroom.png` (case gelap: GitHub solid+putih, fallback accent oranye), `4-desktop-sunset.png`. Visual diperiksa: layout rapi, kontras OK. Catatan: potongan tepi kanan pada shot mobile **identik dgn layout lama** (dibuktikan via stash → screenshot `5-mobile-LAYOUT-LAMA.png`) = artifact environment, **bukan regresi**.
+- **Build**: `npm run build` **0 (31 routes)** ✓ · **Smoke 12/12 (exit 0)** ✓ · dev.log **0 error** ✓ · i18n/backend/11 tema tak tersentuh.
+
+**Screenshot path** (belum di-commit, binary): `C:\Users\akbar\AppData\Local\Temp\opencode\jejak-brand-shots\{1-desktop-classic-brand,2-mobile-375-classic,3-desktop-darkroom,4-desktop-sunset}.png`.
+
+## 2026-10-04: Fix avatar upload persist bug (stale HTTP cache)
+**Status:** Done (root cause = **H5 cache statis `/uploads`**, bukan backend/DB — API terbukti persist sejak awal; fix = URL avatar versioned per upload + `Cache-Control: no-cache` + error 413/400 teri18n; build 31 routes hijau, smoke **12/12**, gosec 0 excl G104, vet/gofmt/test semua bersih)
+
+**Diagnosis (5 hipotesis, H5 menang):**
+- Repro E2E API penuh (login → POST avatar → PUT profile → GET → sesi baru): **semua 200 dan persist** → H1 (form kirim avatar lama), H3 (backend tak update DB), H4 (replica stale) **gugur** — `HandleUploadAvatar` update DB via `UpdateCreatorProfile` (`handlers_profile.go:288`) dan GET profile baca **PRIMARY** (`handlers_profile.go:33`).
+- **Root cause H5**: nama file **deterministik** `/uploads/avatars/{id}.{ext}` — re-upload menimpa file dengan URL **identik**; response `GET /uploads` hanya punya `Last-Modified` **tanpa `Cache-Control`** → browser pakai **heuristic freshness** (RFC 7234 §4.2.2: 10% umur file) → menampilkan **gambar lama dari cache** tanpa revalidate, baik sesudah save maupun refresh. Segala API 200 + preview blob berubah, tapi `<img src>` lama → "avatar balik ke yang lama".
+
+**Fix:**
+- **`backend/internal/handler/handlers_profile.go`** — `newAvatarPaths` (`:357`, dipakai `:240`): nama kini **`{id}-{unixms}.{ext}`** → setiap upload dapat URL BARU → cache miss pasti di semua titik render (dashboard, navbar, halaman publik, OG image) tanpa query-string di DB. `pruneOldAvatars` (`:366`, dipanggil `:299` sesudah update DB sukses): hapus best-effort file versi lama + nama legacy `{id}.{ext}` milik creator yang sama (orphan tak merusak apa pun).
+- **`backend/cmd/server/main.go:324`** — wrapper `cacheRevalidate` (`:371`) set `Cache-Control: no-cache` pada `/uploads/`: setiap reuse wajib revalidate `If-Modified-Since` (FileServer jawab 304 bila tak berubah) — jaring pengaman bila ada URL yang dipakai ulang.
+- **`frontend/app/dashboard/DashboardClient.jsx:615`** — upload error di-map **sebelum** parse JSON: **413 → `avatarTooLarge`**, **400 "Only JPG…" → `avatarBadFormat`** (key baru di `messages/{id,en,de}.json:480`), selain itu teks upstream; guard `if (!upData.avatar_url) throw` mencegah PUT terkirim tanpa field (yang akan **mengosongkan** avatar — dibuktikan saat E2E).
+- State/touchpoint lain sudah benar dari awal: `setAvatarUrl/Preview/File` + broadcast `jejak:profile-updated` utk navbar (`DashboardClient.jsx:650-674`), toast `savedNotice`.
+
+**Verifikasi (semua via :3000 proxy → :8082):**
+- Upload → URL versi baru → PUT 200 → **GET refresh & sesi baru persist** ✓; re-upload **file identik** tetap menghasilkan URL baru ✓; file lama terprune, hanya 1 file/creator di disk ✓; DB `creators.avatar_url` = path versi baru ✓.
+- `GET /uploads/...` → **`cache-control: no-cache`** + `content-type: image/png` ✓ (langsung & via rewrite Next).
+- Edge: body 4MB → **413** · file `.txt` → **400** "Only JPG, PNG, and WebP" · tanpa field → 400 · tanpa session → 401 · avatar DB tak terganggu oleh request gagal ✓.
+- `go build` 0 · `go vet` bersih · `gofmt -l` kosong · `gosec -exclude=G104` **0** · `go test ./...` **all ok** (termasuk subtest baru "re-upload gets a fresh URL and prunes the old file") · `npm run build` **0 (31 routes)** · smoke **12/12 (exit 0)** · halaman `/`, `/dashboard`, `/u/medaka_` = 200, dev.log tanpa error.
+
+**Catatan:** file avatar di DB bisa berupa nama **legacy** (`/uploads/avatars/3.jpg`) — tetap dilayani FileServer; otomatis terganti saat user berikutnya upload. Masih TODO lama: avatar → S3/R2 (filesystem ephemeral saat deploy).
+
+## 2026-10-04: Deploy prep (docs + checklist)
+**Status:** Done (`docs/deploy.md` baru — env checklist Vercel/Railway, secret audit, pre-deploy checklist terisi status aktual, urutan deploy, rollback plan; `.env.example` diperbarui; **deploy belum di-execute**)
+
+**File dibuat/diubah:**
+- **`docs/deploy.md` (baru)** — 5 task dalam 1 dokumen:
+  - **Env checklist**: backend Railway (`PORT`, `APP_MODE=full`, `DATABASE_URL` dgn `sslmode=require`, `DATABASE_REPLICA_URL` kosong, `REDIS_URL`, `COOKIE_SECURE=true`, `TRUST_PROXY=true`) + **service `cmd/worker` wajib** utk APP_MODE=full (tanpa worker click logging menumpuk di queue); frontend Vercel (`GO_API_URL=https://api.jejak.app` server-side only, `SITE_URL=https://jejak.app`). Koreksi penting terhadap prompt: `GO_API_URL` TIDAK dipakai backend Go; `NEXT_PUBLIC_BASE_URL` tidak ada di codebase (yang dipakai `SITE_URL`); `BACKENDS`/`SHARD_DSNS` tidak perlu (tanpa proxy LB).
+  - **Secret audit**: project **tidak punya signing secret** — session = token `crypto/rand` 32-byte di Redis, API key = SHA-256 dari `crypto/rand` (salt tidak ada by design, indexed lookup). Secret produksi = password Postgres/Redis dari Railway (auto-generate). Template `openssl rand -hex 32` dicatat tanpa nilai real.
+  - **Checklist pre-deploy terisi status aktual** (di-run ulang 2026-10-04): `go build` 0 ✓, `go test` all ok ✓, `npm run build` 0 (31 routes) ✓, smoke **12/12** (310ms) ✓, SECURITY_CHECKLIST pass, npm audit **0** ✓. Belum: backup Postgres (plan-dependent), domain/DNS, SSL, monitoring.
+  - **Deploy order**: backend dulu (server + worker + Postgres + Redis + domain `api.jejak.app`) → verify (`curl /api/u/<user>` + smoketest ke prod) → frontend Vercel (root `frontend/`, env 2 var) → custom domain → verify UX penuh. Health check: **tidak ada endpoint `/health`** (di luar scope "jangan ubah code") → pakai `GET /api/u/<username>` atau smoketest penuh.
+  - **Rollback plan**: Railway Deployments rollback, Vercel promote versi lama, Postgres restore, hash git (`acf53b8` pre-upgrade / `33387d4` post-upgrade), env fix via redeploy.
+- **`.env.example`**: tambah `COOKIE_SECURE=false` + `TRUST_PROXY=false` (dengan komentar kapan boleh true) — sebelumnya tak terdokumentasi.
+
+**Temuan penting utk deploy:**
+- **`cmd/worker` = service wajib kedua** di Railway bila `APP_MODE=full` + Redis (queue async; tanpa worker analytics kosong).
+- **Avatar `uploads/` = filesystem ephemeral** Railway → hilang saat redeploy → TODO object storage (S3/R2) sebelum launch publik.
+- Auto-migrate on boot (`migrate.Run`) → tanpa release phase manual; idempotent.
+- Rate limit register/shorten hardcoded (10 & 30 per menit per IP) — bukan env.
+
+**TODO follow-up (sebelum launch publik, list lengkap di docs/deploy.md):** beli domain + DNS · backup Postgres terjadwal (plan free umumnya tanpa auto-backup — verifikasi di dashboard) · Sentry/uptime monitor · avatar → S3/R2 · opsional `GET /health` (butuh ubah code) · `golangci-lint` di CI.
+
 ## 2026-10-04: Upgrade Next.js 14→16 + Tailwind 3→4
 **Status:** Done (branch `upgrade/next16-tailwind4`; build hijau 31 routes, smoketest Go 12/12, i18n ID/EN/DE terverifikasi, auth flow via Next API 201/200/200, dev console 0 error, npm audit **0 vulnerabilities**; rollback point commit `acf53b87aa6431781eefdd9b5b3d2f4d64e453e6`)
 

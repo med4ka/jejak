@@ -74,6 +74,29 @@ function expiryBadge(link, st, t) {
   return null;
 }
 
+// Health-monitor badge (2026-10-04): only the two failure states are
+// surfaced — "Broken" (coral) = destination answered 4xx/5xx, "Timeout"
+// (yellow) = unreachable/no response. healthy and unknown render NOTHING:
+// a healthy link must not grow a permanent badge (noise policy from the
+// spec). health_status comes from scanLinks (GET /api/links).
+function healthBadge(link) {
+  if (link.health_status === "broken") {
+    return (
+      <span className="mt-1 mr-1 inline-block rounded-full border border-flash-coral bg-flash-coral/10 px-2 py-px text-[11px] font-bold text-flash-coral">
+        Broken
+      </span>
+    );
+  }
+  if (link.health_status === "timeout") {
+    return (
+      <span className="mt-1 mr-1 inline-block rounded-full border border-ink bg-flash-yellow px-2 py-px text-[11px] font-bold text-ink">
+        Timeout
+      </span>
+    );
+  }
+  return null;
+}
+
 function SortableLinkRow({ link, onQr, onEdit, onFeature, onToggleActive, dragDisabled, st }) {
   const { t } = useTranslation();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -108,7 +131,20 @@ function SortableLinkRow({ link, onQr, onEdit, onFeature, onToggleActive, dragDi
       </button>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{link.original_url}</p>
+        {/* Badges flow inline: expiry, health (broken/timeout only) and the
+            password lock (🔒 when the link requires a password before the
+            redirect — link.has_password from scanLinks). */}
         {expiryBadge(link, st, t)}
+        {healthBadge(link)}
+        {link.has_password && (
+          <span
+            title="Dilindungi password"
+            aria-label="Dilindungi password"
+            className="mt-1 mr-1 inline-block select-none rounded-full border border-ink bg-paper-grey px-2 py-px text-[11px] leading-normal"
+          >
+            🔒
+          </span>
+        )}
         <p className={`font-mono text-xs ${st.textMuted}`}>
           {t("dashboard.links.row.meta", { shortCode: link.short_code, count: link.click_count })}
         </p>
@@ -617,14 +653,30 @@ export default function DashboardClient() {
         fd.append("avatar", avatarFile);
         const up = await fetch("/api/profile/avatar", { method: "POST", body: fd });
         const upText = await up.text();
+        if (!up.ok) {
+          // The two user-actionable failures get localized copy: 413 is the
+          // server's 3 MB body cap (MaxBytesReader) and 400 with the
+          // magic-byte message is an unsupported format. Other statuses fall
+          // back to the upstream text so real server errors stay visible.
+          let msg = upText || t("errors.dashboard.uploadPhotoFailed");
+          if (up.status === 413) {
+            msg = t("errors.dashboard.avatarTooLarge");
+          } else if (up.status === 400 && upText.indexOf("Only JPG") !== -1) {
+            msg = t("errors.dashboard.avatarBadFormat");
+          }
+          throw new Error(msg);
+        }
         let upData = {};
         try {
           upData = JSON.parse(upText);
         } catch {
-          throw new Error(upText || t("errors.dashboard.uploadPhotoFailed"));
+          throw new Error(t("errors.dashboard.uploadPhotoFailed"));
         }
-        if (!up.ok) {
-          throw new Error(upData.error || upText || t("errors.dashboard.uploadPhotoFailed"));
+        // Without a path in the response the following PUT would silently
+        // send avatar_url: undefined (the field drops out of the JSON) and
+        // CLEAR the stored avatar — fail loudly instead.
+        if (!upData.avatar_url) {
+          throw new Error(t("errors.dashboard.uploadPhotoFailed"));
         }
         finalAvatar = upData.avatar_url;
         setAvatarUrl(finalAvatar);

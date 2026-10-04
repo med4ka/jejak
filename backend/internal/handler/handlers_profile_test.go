@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"jejak/internal/auth"
@@ -136,13 +137,13 @@ func TestHandleUploadAvatar(t *testing.T) {
 		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 			t.Fatalf("response not JSON: %v", err)
 		}
-		if resp["avatar_url"] != "/uploads/avatars/777001.jpg" {
-			t.Errorf("avatar_url = %q, want /uploads/avatars/777001.jpg", resp["avatar_url"])
+		if !strings.HasPrefix(resp["avatar_url"], "/uploads/avatars/777001-") || !strings.HasSuffix(resp["avatar_url"], ".jpg") {
+			t.Errorf("avatar_url = %q, want /uploads/avatars/777001-<ms>.jpg", resp["avatar_url"])
 		}
-		if len(s.profileCalls) != 1 || s.profileCalls[0].avatarURL != "/uploads/avatars/777001.jpg" {
-			t.Errorf("UpdateCreatorProfile not persisted as jpg: %+v", s.profileCalls)
+		if len(s.profileCalls) != 1 || s.profileCalls[0].avatarURL != resp["avatar_url"] {
+			t.Errorf("UpdateCreatorProfile not persisted with returned path: %+v", s.profileCalls)
 		}
-		disk := filepath.Join("uploads", "avatars", "777001.jpg")
+		disk := filepath.Join("uploads", "avatars", filepath.Base(resp["avatar_url"]))
 		defer os.RemoveAll(disk)
 		f, err := os.Open(disk)
 		if err != nil {
@@ -168,10 +169,12 @@ func TestHandleUploadAvatar(t *testing.T) {
 		if rr.Code != http.StatusOK {
 			t.Fatalf("png status = %d, want 200; body=%s", rr.Code, rr.Body.String())
 		}
-		if len(s.profileCalls) != 1 || s.profileCalls[0].avatarURL != "/uploads/avatars/777002.png" {
+		if len(s.profileCalls) != 1 ||
+			!strings.HasPrefix(s.profileCalls[0].avatarURL, "/uploads/avatars/777002-") ||
+			!strings.HasSuffix(s.profileCalls[0].avatarURL, ".png") {
 			t.Errorf("png avatar not persisted: %+v", s.profileCalls)
 		}
-		defer os.RemoveAll(filepath.Join("uploads", "avatars", "777002.png"))
+		defer os.RemoveAll(filepath.Join("uploads", "avatars", filepath.Base(s.profileCalls[0].avatarURL)))
 	})
 
 	t.Run("php shell with .jpg name rejected by magic bytes", func(t *testing.T) {
@@ -220,8 +223,51 @@ func TestHandleUploadAvatar(t *testing.T) {
 		if len(s.profileCalls) != 0 {
 			t.Fatalf("store written for oversize upload: %+v", s.profileCalls)
 		}
-		if _, err := os.Stat(filepath.Join("uploads", "avatars", "42.jpg")); err == nil {
-			t.Fatal("oversize file written to disk; want no file")
+		if matches, _ := filepath.Glob(filepath.Join("uploads", "avatars", "42*")); len(matches) != 0 {
+			t.Fatalf("oversize file written to disk: %v; want no file", matches)
 		}
+	})
+
+	t.Run("re-upload gets a fresh URL and prunes the old file", func(t *testing.T) {
+		s := &fakeStore{creator: db.Creator{ID: 777003, DisplayName: "T", Theme: "classic"}}
+		h := newTestHandler(s)
+		h.Auth = auth.NewMemoryStore()
+
+		req1 := authedMultipart(t, h, 777003, "avatar", "first.jpg", jpeg)
+		rr1 := httptest.NewRecorder()
+		h.HandleUploadAvatar(rr1, req1)
+		if rr1.Code != http.StatusOK {
+			t.Fatalf("first upload: status = %d, body=%s", rr1.Code, rr1.Body.String())
+		}
+		var resp1 map[string]string
+		json.Unmarshal(rr1.Body.Bytes(), &resp1)
+		oldPath := resp1["avatar_url"]
+
+		// Second upload (different format): MUST produce a different URL, or
+		// a browser holding the first image in its HTTP cache would keep
+		// displaying it after a refresh (the stale-avatar bug).
+		req2 := authedMultipart(t, h, 777003, "avatar", "second.png", png)
+		rr2 := httptest.NewRecorder()
+		h.HandleUploadAvatar(rr2, req2)
+		if rr2.Code != http.StatusOK {
+			t.Fatalf("second upload: status = %d, body=%s", rr2.Code, rr2.Body.String())
+		}
+		var resp2 map[string]string
+		json.Unmarshal(rr2.Body.Bytes(), &resp2)
+
+		if resp2["avatar_url"] == oldPath {
+			t.Errorf("re-upload reused URL %q; want a fresh versioned URL", oldPath)
+		}
+		if len(s.profileCalls) != 2 || s.profileCalls[1].avatarURL != resp2["avatar_url"] {
+			t.Errorf("second upload not persisted: %+v", s.profileCalls)
+		}
+		if _, err := os.Stat(filepath.Join("uploads", "avatars", filepath.Base(oldPath))); err == nil {
+			t.Errorf("old file %s still on disk after prune", oldPath)
+		}
+		if _, err := os.Stat(filepath.Join("uploads", "avatars", filepath.Base(resp2["avatar_url"]))); err != nil {
+			t.Errorf("new file missing on disk: %v", err)
+		}
+		// Cleanup the new file as well.
+		_ = os.Remove(filepath.Join("uploads", "avatars", filepath.Base(resp2["avatar_url"])))
 	})
 }

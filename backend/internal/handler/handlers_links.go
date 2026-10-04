@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -16,7 +17,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"jejak/internal/auth"
 	"jejak/internal/db"
+	"jejak/internal/deeplink"
 	"jejak/internal/middleware"
 	"jejak/internal/ratelimit"
 	"jejak/internal/shortener"
@@ -63,6 +66,11 @@ func (h *Handler) doShorten(creatorID *int64, w http.ResponseWriter, r *http.Req
 		Slug      string   `json:"slug"`
 		Tags      []string `json:"tags"`
 		ExpiresAt string   `json:"expires_at"`
+		// Password (migration 17) is the optional per-link password: "" or
+		// absent = public link. Hashed with bcrypt BEFORE CreateURL so the
+		// gate exists in the same INSERT (no create-then-set race). The
+		// plaintext never reaches logs or the database.
+		Password string `json:"password"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -160,9 +168,28 @@ func (h *Handler) doShorten(creatorID *int64, w http.ResponseWriter, r *http.Req
 		expiresAt = &u
 	}
 
+	// Password gate (migration 17): optional, 4-72 characters. bcrypt
+	// truncates silently at 72 bytes, so anything longer is REJECTED (400
+	// with a field error) instead of storing a hash of only the first 72
+	// bytes - the user would believe the whole password matters.
+	passwordHash := ""
+	if pw := req.Password; pw != "" {
+		if len(pw) < 4 || len(pw) > 72 {
+			writeFieldError(w, http.StatusBadRequest, "password", "password harus 4-72 karakter")
+			return
+		}
+		hashed, err := auth.HashPassword(pw)
+		if err != nil {
+			h.Logger.Printf("HashPassword failed: %v", err)
+			http.Error(w, "Failed to hash password", http.StatusInternalServerError)
+			return
+		}
+		passwordHash = hashed
+	}
+
 	// Store in DB. Logged-in creator auto-owns the link; anonymous (nil)
 	// keeps Phase 0-8 behavior (creator_id NULL stays valid).
-	if err := h.Store.CreateURL(shortCode, req.URL, creatorID, string(tagsJSON), expiresAt); err != nil {
+	if err := h.Store.CreateURL(shortCode, req.URL, creatorID, string(tagsJSON), expiresAt, passwordHash); err != nil {
 		// Log the REAL error to the server terminal: without it, every write
 		// failure shows clients only the generic "Failed to store URL" and the
 		// root cause (which constraint, which column) cannot be traced.
@@ -185,7 +212,7 @@ func (h *Handler) doShorten(creatorID *int64, w http.ResponseWriter, r *http.Req
 	// to the remaining expiry: a cache entry must not outlive expires_at (the
 	// redirect also reads expiry from the cached payload: see HandleRedirect).
 	if h.Cache != nil {
-		if b, err := json.Marshal(redirectTarget{URL: req.URL, ExpiresAt: expiresAt}); err == nil {
+		if b, err := json.Marshal(redirectTarget{URL: req.URL, ExpiresAt: expiresAt, PasswordHash: passwordHash}); err == nil {
 			if err := h.Cache.Set(shortCode, string(b), redirectTTL(expiresAt)); err != nil {
 				h.Logger.Printf("Warning: failed to populate cache: %v", err)
 			}
@@ -265,6 +292,20 @@ type redirectTarget struct {
 	// before link expiry existed) remain valid = active forever. When present,
 	// the redirect uses it to detect 410 WITHOUT an extra DB query.
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	// PasswordHash (migration 17): bcrypt hash of the per-link password; the
+	// zero value (absent in JSON) = no gate. Present in the cache payload so
+	// a cache hit still serves the password form without a DB read. Old
+	// entries without the field = no gate; adding a password also evicts the
+	// entry (HandleUpdateLink), so the transition window is covered.
+	PasswordHash string `json:"password_hash,omitempty"`
+	// HealthStatus: only "broken" is stored (omitempty keeps the payload
+	// small); the redirect then answers with the fallback interstitial or
+	// the 503 page instead of the destination. The worker's write evicts the
+	// entry, and the TTL (300s) bounds staleness even without eviction.
+	HealthStatus string `json:"health_status,omitempty"`
+	// FallbackURL: where visitors go while the destination is broken (1s
+	// interstitial). Empty = none (503 page instead).
+	FallbackURL string `json:"fallback_url,omitempty"`
 }
 
 // redirectTTL computes the redirect cache TTL in seconds: 300 by default, but
@@ -383,13 +424,32 @@ func (h *Handler) HandleRedirect(shortCode string, w http.ResponseWriter, r *htt
 					writeGoneHTML(w, "Link kedaluwarsa", "Link ini sudah melewati waktu aktifnya.")
 					return
 				}
+				// Password gate (migration 17): BEFORE logClick - a visitor
+				// who never saw the destination must not appear in analytics.
+				// The cookie value is the SHA-256 of the stored hash (never
+				// the hash itself: bcrypt contains "/", not a cookie-octet).
+				if target.PasswordHash != "" && !passwordVerified(r, shortCode, target.PasswordHash) {
+					writePasswordForm(w, shortCode, passwordErrorFromQuery(r))
+					return
+				}
+				// Health gate: a broken destination answers IN PLACE (1s
+				// fallback interstitial, or 503 when no fallback is set)
+				// BEFORE logClick - same rule as the password gate: only a
+				// visit that can reach a destination is a click.
+				if target.HealthStatus == "broken" {
+					serveHealthGate(w, target.FallbackURL)
+					return
+				}
 				h.logClickAsync(shortCode, r)
-				http.Redirect(w, r, target.pickURL(device), http.StatusFound)
+				respondRedirect(w, r, target.pickURL(device))
 				return
 			}
-			// Old entry (bare URL, pre-Smart Link): still works.
+			// Old entry (bare URL, pre-Smart Link): still works. Such an entry
+			// carries no password/health fields, so it behaves as an open
+			// link; adding either feature evicts the entry (link edit) and the
+			// next write includes the full payload.
 			h.logClickAsync(shortCode, r)
-			http.Redirect(w, r, cached, http.StatusFound)
+			respondRedirect(w, r, cached)
 			return
 		}
 	}
@@ -421,7 +481,25 @@ func (h *Handler) HandleRedirect(shortCode string, w http.ResponseWriter, r *htt
 		return
 	}
 
-	target := redirectTarget{URL: link.OriginalURL, DeviceRules: link.DeviceRules, ExpiresAt: link.ExpiresAt}
+	// Password gate (migration 17): before the cache write and before
+	// logClick - an unauthenticated visitor must neither populate the cache
+	// as if verified nor show up in analytics. Form render, no redirect.
+	if link.PasswordHash != "" && !passwordVerified(r, shortCode, link.PasswordHash) {
+		writePasswordForm(w, shortCode, passwordErrorFromQuery(r))
+		return
+	}
+
+	target := redirectTarget{
+		URL:          link.OriginalURL,
+		DeviceRules:  link.DeviceRules,
+		ExpiresAt:    link.ExpiresAt,
+		PasswordHash: link.PasswordHash,
+		// Only "broken" matters on the redirect path (healthy/timeout/unknown
+		// all redirect normally), so the other statuses stay out of the
+		// payload.
+		HealthStatus: brokenOnly(link.HealthStatus),
+		FallbackURL:  link.FallbackURL,
+	}
 
 	// Populate cache for future requests (nil-safe). The TTL is clamped to the
 	// remaining expiry so a cache entry never outlives the point where the
@@ -434,11 +512,117 @@ func (h *Handler) HandleRedirect(shortCode string, w http.ResponseWriter, r *htt
 		}
 	}
 
+	// Health gate (after the cache write so the cached payload carries the
+	// status, before logClick so a dead destination never counts as a click).
+	if target.HealthStatus == "broken" {
+		serveHealthGate(w, target.FallbackURL)
+		return
+	}
+
 	// Async: fire-and-forget click logging to queue
 	// The redirect response is not blocked by this operation
 	h.logClickAsync(shortCode, r)
 
-	http.Redirect(w, r, target.pickURL(device), http.StatusFound)
+	respondRedirect(w, r, target.pickURL(device))
+}
+
+// respondRedirect sends the final response of GET /r/{code}: a plain 302, or
+// the app-first interstitial for e-commerce links on MOBILE browsers (deep
+// link feature, 2026-10-04). The click is ALWAYS logged by the caller before
+// this function runs, so analytics see the hit exactly once regardless of
+// which branch answers.
+//
+// Interstitial conditions, all required (each one rules out a false
+// positive): a mobile UA (detectDevice: iPhone/iPad/Android: desktop has no
+// merchant app to open, so it goes straight to the web), not a crawler
+// (classifyDevice: a mobile-masquerading bot must keep receiving the plain
+// 302 or link previews would break), and a non-empty app scheme (TikTok and
+// unknown paths fall back to the normal web redirect).
+func respondRedirect(w http.ResponseWriter, r *http.Request, targetURL string) {
+	ua := r.UserAgent()
+	if dev := detectDevice(ua); dev != "" && classifyDevice(ua) != "bot" {
+		if platform, scheme := deeplink.DetectEcommerce(targetURL); scheme != "" {
+			writeDeepLinkHTML(w, platform, scheme, targetURL)
+			return
+		}
+	}
+	http.Redirect(w, r, targetURL, http.StatusFound)
+}
+
+// writeDeepLinkHTML answers 200 with a minimal interstitial: try the merchant
+// app scheme first, fall back to the original web URL after 1.5s when the
+// app is not installed. Inline styles only (same spirit as writeGoneHTML):
+// the page must render with zero external assets because it is served by the
+// redirect endpoint, far from the Next.js bundle.
+//
+// Script design (deviation from the naive window.location sketch): the app
+// scheme is loaded through a HIDDEN IFRAME instead of the top frame.
+// Navigating the top frame to an unregistered scheme on Chrome/Android
+// replaces the page with net::ERR_UNKNOWN_URL_SCHEME and the setTimeout
+// fallback never runs: the visitor sees an error instead of the web page.
+// A failed iframe load is silent, and a successful one opens the app while
+// a visibilitychange listener cancels the pending web fallback (so returning
+// from the app does not yank the user to the browser). json.Marshal is used
+// for both embedded strings: Go's encoder escapes <, > and &, so a "</script>"
+// inside the stored URL can never terminate the script block (HTML attribute
+// context gets html.EscapeString for the same reason).
+func writeDeepLinkHTML(w http.ResponseWriter, platform, scheme, webURL string) {
+	schemeJS, _ := json.Marshal(scheme)
+	webJS, _ := json.Marshal(webURL)
+	webAttr := html.EscapeString(webURL)
+	name := strings.ToUpper(platform[:1]) + platform[1:]
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("X-Robots-Tag", "noindex")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, `<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Membuka %s</title>
+<style>
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+         background:#FAFAF7; color:#1C1A12; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  main { text-align:center; padding:24px; }
+  h1 { font-size:1.75rem; margin:0 0 8px; }
+  h1 span { color:#FF5C3D; }
+  p { margin:0 0 24px; font-size:0.95rem; opacity:0.75; }
+  a { display:inline-block; text-decoration:none; color:#1C1A12;
+      border:2px solid #1C1A12; background:#FFE14D; border-radius:999px;
+      padding:12px 24px; font-weight:700; font-size:0.95rem; }
+  a:hover { filter:brightness(0.95); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Membuka <span>%s</span>&hellip;</h1>
+  <p>Jika aplikasinya terpasang di HP, dibuka otomatis. Kalau tidak, kamu lanjut ke web.</p>
+  <a href="%s">Buka di web sekarang</a>
+</main>
+<script>
+(function () {
+  var app = %s;
+  var web = %s;
+  var done = false;
+  function goWeb() { if (done) { return; } done = true; window.location.replace(web); }
+  var timer = setTimeout(goWeb, 1500);
+  try {
+    var f = document.createElement("iframe");
+    f.style.display = "none";
+    f.src = app;
+    document.body.appendChild(f);
+    setTimeout(function () { if (f.parentNode) { f.parentNode.removeChild(f); } }, 3000);
+  } catch (e) {}
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) { done = true; clearTimeout(timer); }
+  });
+})();
+</script>
+</body>
+</html>
+`, name, name, webAttr, schemeJS, webJS)
 }
 
 // logClickAsync pushes the click event onto a Redis List queue asynchronously

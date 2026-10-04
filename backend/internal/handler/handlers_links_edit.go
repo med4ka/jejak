@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"jejak/internal/auth"
 	"jejak/internal/middleware"
 )
 
@@ -172,14 +173,75 @@ func (h *Handler) HandleUpdateLink(shortCode string, w http.ResponseWriter, r *h
 		IsFeatured  *bool              `json:"is_featured"`
 		IsActive    *bool              `json:"is_active"`
 		ExpiresAt   json.RawMessage    `json:"expires_at"`
+		// Password (migration 17): nil = field not sent = keep the current
+		// gate; "" = REMOVE the password (link becomes public); a value =
+		// set/replace (validated 4-72 chars, bcrypt-hashed here). The
+		// string-pointer distinguishes absent from clear - a plain string
+		// could not. A password change also invalidates every old access
+		// cookie (the cookie stores the digest OF the hash).
+		Password *string `json:"password"`
+		// FallbackURL (migration 17): nil = keep; "" = clear; a value =
+		// where visitors go while the destination is broken (http(s), same
+		// validRemoteURL rule as original_url: it must point at the
+		// Internet).
+		FallbackURL *string `json:"fallback_url"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-	if req.DeviceRules == nil && req.Tags == nil && req.IsFeatured == nil && req.IsActive == nil && len(req.ExpiresAt) == 0 {
+	if req.DeviceRules == nil && req.Tags == nil && req.IsFeatured == nil && req.IsActive == nil && len(req.ExpiresAt) == 0 && req.Password == nil && req.FallbackURL == nil {
 		http.Error(w, "Nothing to update", http.StatusBadRequest)
 		return
+	}
+
+	// password: absent = keep (no write), "" = clear, value = set. Same
+	// 4-72 rule as doShorten: bcrypt truncates at 72 bytes silently, so a
+	// longer password must be rejected instead of half-hashed.
+	if req.Password != nil {
+		pw := *req.Password
+		hash := ""
+		if pw != "" {
+			if len(pw) < 4 || len(pw) > 72 {
+				writeFieldError(w, http.StatusBadRequest, "password", "password harus 4-72 karakter")
+				return
+			}
+			hashed, err := auth.HashPassword(pw)
+			if err != nil {
+				h.Logger.Printf("HashPassword failed: %v", err)
+				http.Error(w, "Failed to hash password", http.StatusInternalServerError)
+				return
+			}
+			hash = hashed
+		}
+		if err := h.Store.SetLinkPassword(*creatorID, shortCode, hash); err != nil {
+			if err == sql.ErrNoRows {
+				http.Error(w, "Unknown short code or not yours", http.StatusNotFound)
+				return
+			}
+			h.Logger.Printf("SetLinkPassword failed for %q: %v", shortCode, err)
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// fallback_url: absent = keep, "" = clear, value = set (must be a real
+	// http(s) destination - it is where visitors end up).
+	if req.FallbackURL != nil {
+		fb := *req.FallbackURL
+		if fb != "" && !validRemoteURL(fb) {
+			writeFieldError(w, http.StatusBadRequest, "fallback_url", "fallback_url harus URL http(s) yang valid")
+			return
+		}
+		if err := h.Store.SetLinkFallback(*creatorID, shortCode, fb); err != nil {
+			if err == sql.ErrNoRows {
+				http.Error(w, "Unknown short code or not yours", http.StatusNotFound)
+				return
+			}
+			h.Logger.Printf("SetLinkFallback failed for %q: %v", shortCode, err)
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	// expires_at: 3 cases (see optionalTime). RFC3339 → UTC; must be > 1 hour

@@ -63,7 +63,7 @@ func TestIntegrationCRUDRoundTrip(t *testing.T) {
 
 	code := uniqCode("itg")
 	exp := time.Now().UTC().Add(48 * time.Hour).Truncate(time.Second)
-	if err := s.CreateURL(code, "https://example.com/crud", creator, `["alpha","beta"]`, &exp); err != nil {
+	if err := s.CreateURL(code, "https://example.com/crud", creator, `["alpha","beta"]`, &exp, ""); err != nil {
 		t.Fatalf("CreateURL: %v", err)
 	}
 
@@ -197,7 +197,7 @@ func TestIntegrationExpiredLinkStored(t *testing.T) {
 	}
 	code := uniqCode("itgx")
 	past := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second)
-	if err := s.CreateURL(code, "https://example.com/gone", &id, "[]", &past); err != nil {
+	if err := s.CreateURL(code, "https://example.com/gone", &id, "[]", &past, ""); err != nil {
 		t.Fatalf("CreateURL: %v", err)
 	}
 	// GetLink proves the expiry TIMESTAMP round-trips; the LIST path
@@ -247,7 +247,7 @@ func TestIntegrationOwnerScoping(t *testing.T) {
 	}
 
 	code := uniqCode("itgo")
-	if err := s.CreateURL(code, "https://example.com/owned", &a, "[]", nil); err != nil {
+	if err := s.CreateURL(code, "https://example.com/owned", &a, "[]", nil, ""); err != nil {
 		t.Fatalf("CreateURL: %v", err)
 	}
 
@@ -286,7 +286,7 @@ func TestIntegrationBulkConflictAndFlags(t *testing.T) {
 
 	// Bulk: three rows, the middle one conflicts with a pre-existing code.
 	taken := uniqCode("itgt")
-	if err := s.CreateURL(taken, "https://example.com/pre", &id, "[]", nil); err != nil {
+	if err := s.CreateURL(taken, "https://example.com/pre", &id, "[]", nil, ""); err != nil {
 		t.Fatalf("seed CreateURL: %v", err)
 	}
 	c1, c2, c3 := uniqCode("itb1"), uniqCode("itb2"), uniqCode("itb3")

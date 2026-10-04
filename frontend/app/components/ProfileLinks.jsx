@@ -6,6 +6,7 @@ import { Inbox } from "lucide-react";
 import ThemeBackdrop from "./ThemeBackdrop";
 import { themeStyles } from "../../lib/themes";
 import { useTranslation } from "../../lib/I18nProvider";
+import { detectBrand, isBrightColor, isDarkColor, rgba, ICON_MAP } from "../../lib/brands";
 
 // DESIGN.md §6: "photo leaving the camera" entrance: opacity + a small
 // translateY (8-12px), 50-80ms stagger per card, firm ease-out, ≤400ms total.
@@ -65,7 +66,40 @@ export default function ProfileLinks({ links, top, theme = "classic" }) {
     <>
       {/* Subtle grain behind the content (global texture, all themes). */}
       <ThemeBackdrop />
-      {links.map((l, i) => (
+      {links.map((l, i) => {
+        // AUTO-DETECT BRAND (2026-10-04): domain URL → warna + ikon lucide
+        // (lib/brands.js: 60 brand). Box style memakai INLINE STYLE karena
+        // warnanya datang dari data brand, bukan token tema. Domain tak
+        // dikenal jatuh ke token ts.accent supaya ikut warna 11 tema.
+        const brand = detectBrand(l.original_url);
+        const IconComp = ICON_MAP[brand.icon] || ICON_MAP.link;
+        let boxStyle;
+        if (!brand.matched) {
+          // Fallback: token ts.accent (bg solid konsisten dgn badge
+          // Unggulan, kontras by design lintas tema), border transparan.
+          boxStyle = { borderColor: "transparent" };
+        } else if (isBrightColor(brand.color)) {
+          // Warna terang (mis. Snapchat #FFFC00): tint 20% + ikon terang
+          // tidak kontras di kartu putih → bg solid + ikon gelap.
+          boxStyle = { backgroundColor: brand.color, borderColor: brand.color, color: "#1C1A12" };
+        } else if (isDarkColor(brand.color)) {
+          // Warna gelap (mis. X/Medium #000000): tint 20% + ikon hitam
+          // hilang di tema gelap (darkroom) → bg solid + ikon putih +
+          // rim putih 25% supaya box terpisah dari kartu gelap.
+          boxStyle = {
+            backgroundColor: brand.color,
+            borderColor: "rgba(255,255,255,0.25)",
+            color: "#FFFFFF",
+          };
+        } else {
+          // Normal: tint 20% + border 55% + ikon berwarna brand.
+          boxStyle = {
+            backgroundColor: rgba(brand.color, 0.2),
+            borderColor: rgba(brand.color, 0.55),
+            color: brand.color,
+          };
+        }
+        return (
         // Tilt wrapper (pure CSS, globals.css .tilt-wrap): the angle is held by
         // the --tilt custom property so it can be reduced automatically on
         // narrow screens (±2° on desktop → ±0.6° at ≤640px). framer-motion
@@ -100,38 +134,59 @@ export default function ProfileLinks({ links, top, theme = "classic" }) {
               ts.barPrimary ? (i % 2 === 0 ? ts.barPrimary : ts.barSecondary) : ""
             }`}
           >
-            {/* px-3 on mobile, px-4 at ≥640px plus a tighter gap (mobile fix):
-                URL text and badges get breathing room at 320-375px without
-                changing the desktop layout. */}
-            <div className="flex items-center justify-between gap-2 px-3 pt-4 sm:gap-3 sm:px-4">
-              <p className={`min-w-0 truncate text-sm font-medium ${ts.url || ""}`}>{l.original_url}</p>
-              {/* shrink-0 + whitespace-nowrap: the TRENDING badge and the count
-                  are never truncated or wrapped onto a second line on narrow
-                  screens. */}
-              <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
-                {l.is_featured && (
-                  <span className={`${ts.radiusFull} ${ts.accent} px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide`}>
-                    {t("forms.profileLinks.featuredBadge")}
-                  </span>
-                )}
-                {top === l.short_code && (
-                    <span className={`${ts.radiusFull} ${ts.badge} px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide`}>
-                      {t("forms.profileLinks.trendingBadge")}
-                    </span>
-                  )}
-                <span className={`font-mono text-sm font-bold ${ts.countColor || ""}`}>{l.click_count}</span>
+            {/* BRAND ICON BOX (32px mobile / 40px desktop, radius 8px): auto-
+                detected dari domain link. bg/border/warna ikon dari data
+                brand (inline style di atas); fallback = ts.accent. Motion
+                whileHover scale 1.05 (spring) — hover PADA box, kartu tetap
+                y:-2 lewat motion.a induk. aria-hidden: dekoratif, URL sudah
+                terbaca sebagai teks. */}
+            <div className="flex items-center gap-3 px-3 sm:px-4">
+              <motion.div
+                aria-hidden="true"
+                whileHover={{ scale: 1.05 }}
+                transition={{ type: "spring", stiffness: 400, damping: 17 }}
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border md:h-10 md:w-10 ${brand.matched ? "" : ts.accent}`}
+                style={boxStyle}
+              >
+                <IconComp className="h-4 w-4 md:h-5 md:w-5" strokeWidth={2} />
+              </motion.div>
+              <div className="min-w-0 flex-1">
+                {/* px-3 on mobile, px-4 at ≥640px plus a tighter gap (mobile fix):
+                    URL text and badges get breathing room at 320-375px without
+                    changing the desktop layout. Padding now lives on the OUTER
+                    row above; this column only splits URL row / slug row. */}
+                <div className="flex items-center justify-between gap-2 pt-4 sm:gap-3">
+                  <p className={`min-w-0 truncate text-sm font-medium ${ts.url || ""}`}>{l.original_url}</p>
+                  {/* shrink-0 + whitespace-nowrap: the TRENDING badge and the count
+                      are never truncated or wrapped onto a second line on narrow
+                      screens. */}
+                  <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
+                    {l.is_featured && (
+                      <span className={`${ts.radiusFull} ${ts.accent} px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide`}>
+                        {t("forms.profileLinks.featuredBadge")}
+                      </span>
+                    )}
+                    {top === l.short_code && (
+                        <span className={`${ts.radiusFull} ${ts.badge} px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide`}>
+                          {t("forms.profileLinks.trendingBadge")}
+                        </span>
+                      )}
+                    <span className={`font-mono text-sm font-bold ${ts.countColor || ""}`}>{l.click_count}</span>
+                  </div>
+                </div>
+                {/* Polaroid bottom margin: Caveat caption (§3, first slot in the
+                    hierarchy). risoPrint ships its own ts.slug (JetBrains Mono; the
+                    specification forbids handwritten fonts for that theme), so the
+                    caption fallback is skipped. */}
+                <p className={`pb-3 pt-1 ${ts.slug ? ts.slug : `font-caption text-lg leading-none ${ts.caption}`}`}>
+                  {t("forms.profileLinks.shortCode", { shortCode: l.short_code })}
+                </p>
               </div>
             </div>
-            {/* Polaroid bottom margin: Caveat caption (§3, first slot in the
-                hierarchy). risoPrint ships its own ts.slug (JetBrains Mono; the
-                specification forbids handwritten fonts for that theme), so the
-                caption fallback is skipped. */}
-            <p className={`px-3 pb-3 pt-1 sm:px-4 ${ts.slug ? ts.slug : `font-caption text-lg leading-none ${ts.caption}`}`}>
-              {t("forms.profileLinks.shortCode", { shortCode: l.short_code })}
-            </p>
           </motion.a>
         </div>
-      ))}
+        );
+      })}
     </>
   );
 }

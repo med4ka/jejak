@@ -16,6 +16,7 @@ import (
 	"jejak/internal/auth"
 	"jejak/internal/cache"
 	"jejak/internal/db"
+	"jejak/internal/health"
 	"jejak/internal/ratelimit"
 )
 
@@ -73,6 +74,24 @@ type Handler struct {
 	// DB, so it must be slower than an ordinary dashboard read. Bucket is per
 	// creator (not IP), like BulkLimiter. Set by main; nil = no throttling (tests).
 	ExportLimiter *ratelimit.Limiter
+	// VerifyLimiter throttles POST /r/{code}/verify: 10 attempts/minute per
+	// IP+code - bcrypt runs on every attempt, so an unthrottled form would
+	// be a CPU-burning brute-force vector. Failed attempts Record; a success
+	// Reset forgives the bucket (same pattern as LoginLimiter: the
+	// legitimate owner is never punished for typos). Set by main; nil = no
+	// throttling (tests).
+	VerifyLimiter *ratelimit.Limiter
+	// HealthTriggerLimiter throttles POST /api/links/{code}/check-health:
+	// 10 manual checks/minute per IP - every attempt makes a live outbound
+	// request to the destination, so it needs its own budget (separate from
+	// ShortenLimiter so checking never blocks link creation). Set by main;
+	// nil = no throttling (tests).
+	HealthTriggerLimiter *ratelimit.Limiter
+	// Checker runs health checks (live HEAD request + persistence +
+	// notification + cache eviction). Set by main after NewHandler; nil
+	// makes the manual trigger answer 503 instead of making an outbound
+	// request without its dependency wired (defensive).
+	Checker *health.Checker
 
 	// uniqueMu guards uniqueSeen: the in-memory dedup fallback (Phase 14)
 	// used when Redis == nil (single-process baseline): isUniqueClick writes

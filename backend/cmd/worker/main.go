@@ -296,6 +296,11 @@ func main() {
 
 	go worker.Start()
 
+	// Link health monitor (migration 17): batch of <=50 destinations on boot
+	// and every 6h (see health.go). Shares the worker lock instance: only
+	// one worker process runs, so only one health batch runs.
+	go startHealthMonitor(ctx, store, rdb)
+
 	// Block until the shutdown signal arrives, then release our own lock.
 	<-ctx.Done()
 	log.Println("Shutting down worker...")

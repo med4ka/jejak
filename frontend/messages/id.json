@@ -477,6 +477,8 @@
       "changeReverted": "Gagal: perubahan dibatalkan.",
       "qrZipFailed": "Gagal membuat ZIP QR.",
       "uploadPhotoFailed": "Gagal upload foto",
+      "avatarTooLarge": "Foto terlalu besar (maks 2 MB)",
+      "avatarBadFormat": "Format tidak didukung: pakai JPG, PNG, atau WebP",
       "saveProfile": "Gagal menyimpan"
     },
     "analytics": {

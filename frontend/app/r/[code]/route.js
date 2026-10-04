@@ -195,7 +195,11 @@ async function proxy(req, code) {
 
   let goRes;
   try {
-    goRes = await fetch(`${GO_API_URL}/r/${code}`, {
+    // req.url's query string MUST be forwarded: /r/{code}?e=1 carries the
+    // password-form PRG error flag (dropping it would silently show a clean
+    // form after a failed attempt).
+    const search = new URL(req.url).search || "";
+    goRes = await fetch(`${GO_API_URL}/r/${code}${search}`, {
       headers: clientForward(req),
       redirect: "manual",
       cache: "no-store",
@@ -209,7 +213,23 @@ async function proxy(req, code) {
   // statuses (301, 307, 400, etc.) pass through unchanged.
   if (goRes.status === 404) return htmlResponse("404", 404);
   if (goRes.status === 410) return htmlResponse("410", 410);
-  if (goRes.status >= 500) return htmlResponse("5xx", goRes.status);
+  if (goRes.status >= 500) {
+    // A 5xx with an HTML body is a STYLED Jejak page from the backend
+    // (health monitor: "503 Link sedang bermasalah" + Retry-After): forward
+    // it as-is so the visitor sees the real health page. Plain-text 5xx
+    // (panics, upstream errors) still get the friendly fallback below.
+    const ct = goRes.headers.get("content-type") || "";
+    if (ct.includes("text/html")) {
+      const out = new Headers();
+      for (const name of ["content-type", "cache-control", "retry-after"]) {
+        const v = goRes.headers.get(name);
+        if (v) out.set(name, v);
+      }
+      const html = await goRes.arrayBuffer();
+      return new NextResponse(html, { status: goRes.status, headers: out });
+    }
+    return htmlResponse("5xx", goRes.status);
+  }
 
   // The response passes through as-is: 302 (with Location), 400, 429, ...
   // The status is never swallowed or altered.

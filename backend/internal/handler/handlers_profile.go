@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"jejak/internal/db"
 	"jejak/internal/middleware"
@@ -236,8 +237,7 @@ func (h *Handler) HandleUploadAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	avatarPath := fmt.Sprintf("/uploads/avatars/%d.%s", *creatorID, ext)
-	diskPath := filepath.Join("uploads", "avatars", fmt.Sprintf("%d.%s", *creatorID, ext))
+	avatarPath, diskPath := newAvatarPaths(*creatorID, ext)
 
 	// #nosec G703,G304 -- diskPath is built from the session's int64
 	// creatorID (formatted %d, never a raw string) plus an extension chosen
@@ -291,6 +291,13 @@ func (h *Handler) HandleUploadAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Best effort: the row now points at the new file, so every other file
+	// with this creator's id prefix (the previous versioned name and the
+	// legacy stable "{id}.{ext}" name) is unreferenced. Failures are
+	// ignored: an orphan file costs disk space, a failed delete must not
+	// fail an otherwise successful upload.
+	pruneOldAvatars(*creatorID, filepath.Base(diskPath))
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
 		"avatar_url": avatarPath,
@@ -336,4 +343,40 @@ func nullableString(s string) any {
 		return nil
 	}
 	return s
+}
+
+// newAvatarPaths derives the public URL and the disk path for an upload:
+// "/uploads/avatars/{id}-{unixmillis}.{ext}". The version suffix is the fix
+// for the stale-avatar bug: a stable "{id}.{ext}" name keeps the URL identical
+// across re-uploads, so a browser that fetched the image earlier serves the
+// OLD bytes from its HTTP cache (the static handler sends no Cache-Control,
+// which means heuristic freshness from Last-Modified) and the new photo never
+// appears after a refresh. A fresh URL forces a cache miss everywhere the
+// avatar is rendered (dashboard, navbar, public page, OG image) without
+// query-string hacks in the database.
+func newAvatarPaths(creatorID int64, ext string) (publicURL, diskPath string) {
+	name := fmt.Sprintf("%d-%d.%s", creatorID, time.Now().UnixMilli(), ext)
+	return "/uploads/avatars/" + name, filepath.Join("uploads", "avatars", name)
+}
+
+// pruneOldAvatars removes this creator's earlier avatar files after a
+// successful upload: versioned names ("{id}-*") and the legacy stable name
+// ("{id}.{ext}"). Only files of the same id are touched, never another
+// creator's. Errors are deliberately ignored (best effort, see caller).
+func pruneOldAvatars(creatorID int64, keep string) {
+	entries, err := os.ReadDir("uploads/avatars")
+	if err != nil {
+		return
+	}
+	versioned := fmt.Sprintf("%d-", creatorID)
+	legacy := fmt.Sprintf("%d.", creatorID)
+	for _, e := range entries {
+		n := e.Name()
+		if n == keep || e.IsDir() {
+			continue
+		}
+		if strings.HasPrefix(n, versioned) || strings.HasPrefix(n, legacy) {
+			_ = os.Remove(filepath.Join("uploads", "avatars", n))
+		}
+	}
 }

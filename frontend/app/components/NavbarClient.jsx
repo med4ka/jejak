@@ -20,6 +20,7 @@ import { ChartColumnIncreasing, ChevronDown, Link2, Menu, MonitorSmartphone, Plu
 import { AnimatePresence, motion } from "framer-motion";
 import AuthModal from "./AuthModal";
 import LanguageSwitcher from "./LanguageSwitcher";
+import NotificationsBell from "./NotificationsBell";
 import { themeStyles } from "../../lib/themes";
 import { DEFAULT_TRANSITION, EASE } from "../../lib/animations";
 import { useTranslation } from "../../lib/I18nProvider";
@@ -398,6 +399,11 @@ export default function NavbarClient({ isLoggedIn }) {
                     </Link>
                   </motion.div>
 
+                  {/* Health-monitor notifications (logged in only): unread
+                      badge + dropdown feed; placed before the language
+                      switcher to keep CTAs right-most. */}
+                  <NotificationsBell t={t} />
+
                   <LanguageSwitcher />
 
                   {/* Avatar dropdown */}
@@ -624,6 +630,9 @@ export default function NavbarClient({ isLoggedIn }) {
                     <Link href="/dashboard" className={`${drawerItemCls} mt-2`}>
                       {tr("nav.account.profile")}
                     </Link>
+                    {/* Health-monitor notifications (mobile drawer): same
+                        feed as the desktop bell, in-flow panel. */}
+                    <NotificationsBell t={t} variant="drawer" triggerClassName={drawerItemCls} />
                     <button type="button" onClick={logout} className={drawerItemCls}>
                       {tr("nav.account.logout")}
                     </button>

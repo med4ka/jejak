@@ -93,6 +93,20 @@ type fakeStore struct {
 	clickRows     []db.ClickRow
 	analyticsErr  error
 	dataPer       string
+	// Health monitor + password (2026-10-04): passwordCalls/fallbackCalls
+	// record SetLinkPassword/SetLinkFallback (scoped like the real store via
+	// hasCode); healthCalls records UpdateLinkHealth; dueList is returned by
+	// ListLinksHealthDue; notifList/notifUnread feed the notification
+	// handlers; readCalls records MarkNotificationRead ids; notifSeq gives
+	// CreateNotification unique ids.
+	passwordCalls []passwordCall
+	fallbackCalls []fallbackCall
+	healthCalls   []healthCall
+	dueList       []db.Link
+	notifList     []db.Notification
+	notifUnread   int64
+	readCalls     []int64
+	notifSeq      int64
 }
 
 type storedKeyCall struct {
@@ -121,11 +135,32 @@ type profileCall struct {
 }
 
 type createCall struct {
-	code        string
-	originalURL string
-	creatorID   *int64
-	tagsJSON    string
-	expiresAt   *time.Time // link expiry (nil = no limit)
+	code         string
+	originalURL  string
+	creatorID    *int64
+	tagsJSON     string
+	expiresAt    *time.Time // link expiry (nil = no limit)
+	passwordHash string     // bcrypt hash ("" = no gate), migration 17
+}
+
+// passwordCall records SetLinkPassword(creatorID=shortCode, hash "" = clear).
+type passwordCall struct {
+	code string
+	hash string
+}
+
+// fallbackCall records SetLinkFallback(creatorID=shortCode, url "" = clear).
+type fallbackCall struct {
+	code string
+	url  string
+}
+
+// healthCall records UpdateLinkHealth (zero notifiedAt = reset marker).
+type healthCall struct {
+	code       string
+	status     string
+	checkedAt  time.Time
+	notifiedAt time.Time
 }
 
 // expiryCall records SetLinkExpiry(creatorID=shortCode, expiresAt nil=clear).
@@ -141,8 +176,8 @@ func (f *fakeStore) GetURL(shortCode string) (string, error) {
 	return "", sql.ErrNoRows
 }
 
-func (f *fakeStore) CreateURL(shortCode, originalURL string, creatorID *int64, tagsJSON string, expiresAt *time.Time) error {
-	f.created = append(f.created, createCall{code: shortCode, originalURL: originalURL, creatorID: creatorID, tagsJSON: tagsJSON, expiresAt: expiresAt})
+func (f *fakeStore) CreateURL(shortCode, originalURL string, creatorID *int64, tagsJSON string, expiresAt *time.Time, passwordHash string) error {
+	f.created = append(f.created, createCall{code: shortCode, originalURL: originalURL, creatorID: creatorID, tagsJSON: tagsJSON, expiresAt: expiresAt, passwordHash: passwordHash})
 	if f.urls == nil {
 		f.urls = map[string]string{}
 	}
@@ -183,6 +218,74 @@ func (f *fakeStore) SetLinkExpiry(creatorID int64, shortCode string, expiresAt *
 	}
 	f.expiryCalls = append(f.expiryCalls, expiryCall{code: shortCode, expiresAt: expiresAt})
 	return nil
+}
+
+// SetLinkPassword mirrors the real store: scoped to rows created via
+// CreateURL (hasCode); unknown/foreign -> sql.ErrNoRows (404).
+func (f *fakeStore) SetLinkPassword(creatorID int64, shortCode, passwordHash string) error {
+	if !hasCode(f.created, shortCode) {
+		return sql.ErrNoRows
+	}
+	f.passwordCalls = append(f.passwordCalls, passwordCall{code: shortCode, hash: passwordHash})
+	return nil
+}
+
+// SetLinkFallback mirrors SetLinkPassword (owner-scoped, "" = clear).
+func (f *fakeStore) SetLinkFallback(creatorID int64, shortCode, fallbackURL string) error {
+	if !hasCode(f.created, shortCode) {
+		return sql.ErrNoRows
+	}
+	f.fallbackCalls = append(f.fallbackCalls, fallbackCall{code: shortCode, url: fallbackURL})
+	return nil
+}
+
+// UpdateLinkHealth records the worker/manual check (not owner-scoped, like
+// the real store: unknown codes are a no-op, not an error).
+func (f *fakeStore) UpdateLinkHealth(shortCode, status string, checkedAt, notifiedAt time.Time) error {
+	f.healthCalls = append(f.healthCalls, healthCall{code: shortCode, status: status, checkedAt: checkedAt, notifiedAt: notifiedAt})
+	return nil
+}
+
+// ListLinksHealthDue returns the preset dueList (tests control the batch).
+func (f *fakeStore) ListLinksHealthDue(limit int) ([]db.Link, error) {
+	out := f.dueList
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// CreateNotification appends to notifList and returns a unique id.
+func (f *fakeStore) CreateNotification(creatorID int64, typ, shortCode, message string) (int64, error) {
+	f.notifSeq++
+	f.notifList = append(f.notifList, db.Notification{ID: f.notifSeq, Type: typ, ShortCode: shortCode, Message: message})
+	return f.notifSeq, nil
+}
+
+// ListNotifications returns the preset notifList (newest first already).
+func (f *fakeStore) ListNotifications(creatorID int64, limit int) ([]db.Notification, error) {
+	out := f.notifList
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// CountUnreadNotifications returns the preset badge count.
+func (f *fakeStore) CountUnreadNotifications(creatorID int64) (int64, error) {
+	return f.notifUnread, nil
+}
+
+// MarkNotificationRead records the id and answers sql.ErrNoRows for an
+// unknown one (404, same contract as the real store).
+func (f *fakeStore) MarkNotificationRead(creatorID, id int64) error {
+	for _, n := range f.notifList {
+		if n.ID == id {
+			f.readCalls = append(f.readCalls, id)
+			return nil
+		}
+	}
+	return sql.ErrNoRows
 }
 
 func (f *fakeStore) IncrementClickCount(shortCode string) error { return nil }

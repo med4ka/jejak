@@ -45,6 +45,34 @@ type Link struct {
 	// computed in scanLinks so every list reader (dashboard, public profile,
 	// API) agrees on the value without recomputing the rule per handler.
 	Status string `json:"status"`
+	// Health monitor (migration 17): unknown|healthy|broken|timeout, stamped
+	// by the worker every 6h or by the manual "check now" trigger. The badge
+	// only shows broken (red) and timeout (yellow); healthy/unknown stay
+	// silent, so a quiet dashboard is a healthy dashboard.
+	HealthStatus string `json:"health_status"`
+	// LastHealthCheck is the moment of the last worker/manual check (NULL =
+	// never checked). Always UTC - written from time.Now().UTC().
+	LastHealthCheck *time.Time `json:"last_health_check,omitempty"`
+	// FallbackURL, when set, is where visitors are sent (via a 1s
+	// interstitial) while the destination is broken. Empty string = no
+	// fallback (the redirect then answers 503 instead).
+	FallbackURL string `json:"fallback_url,omitempty"`
+	// HasPassword is derived from password_hash <> '' at scan time. The hash
+	// itself is never serialized (PasswordHash, json:"-") - only GetLink
+	// reads it, for the redirect gate and cookie verification.
+	HasPassword bool `json:"has_password"`
+	// PasswordHash is the bcrypt hash of the optional per-link password. It
+	// must never leave the backend (json:"-"); the redirect compares the
+	// cookie (SHA-256 of this value) against it.
+	PasswordHash string `json:"-"`
+	// CreatorID is only filled by GetLink (the owner check for the manual
+	// health trigger and the notification recipient). List queries are
+	// already scoped by creator, so they do not select it (json:"-").
+	CreatorID *int64 `json:"-"`
+	// HealthNotifiedAt marks that the "link is broken" notification was
+	// already created, so a link that stays broken does not spam the bell
+	// (internal bookkeeping, json:"-").
+	HealthNotifiedAt *time.Time `json:"-"`
 }
 
 // BulkURL is one input row of CreateURLsBatch, already validated by the
@@ -140,8 +168,10 @@ func LinkStatus(expiresAt *time.Time, now time.Time) string {
 
 // scanLinks reads link rows (SELECT must include is_featured AND
 // COALESCE(tags,'[]') AS tags AND COALESCE(device_rules,'{}') AS device_rules
-// AND unique_click_count AND is_active AND expires_at). Corrupt JSON fails
-// soft to empty: one broken row must never take the whole list down.
+// AND unique_click_count AND is_active AND expires_at AND health_status AND
+// last_health_check AND fallback_url AND (password_hash <> ”) AS has_password)
+// - the four migration 17 columns come last, in that order. Corrupt JSON
+// fails soft to empty: one broken row must never take the whole list down.
 func scanLinks(rows *sql.Rows) ([]Link, error) {
 	var out []Link
 	now := time.Now().UTC()
@@ -150,7 +180,8 @@ func scanLinks(rows *sql.Rows) ([]Link, error) {
 		var tags sql.NullString
 		var rules sql.NullString
 		var expires sql.NullTime
-		if err := rows.Scan(&l.ShortCode, &l.OriginalURL, &l.ClickCount, &l.UniqueClickCount, &l.Position, &l.IsFeatured, &l.IsActive, &tags, &rules, &expires); err != nil {
+		var lastCheck sql.NullTime
+		if err := rows.Scan(&l.ShortCode, &l.OriginalURL, &l.ClickCount, &l.UniqueClickCount, &l.Position, &l.IsFeatured, &l.IsActive, &tags, &rules, &expires, &l.HealthStatus, &lastCheck, &l.FallbackURL, &l.HasPassword); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -165,6 +196,10 @@ func scanLinks(rows *sql.Rows) ([]Link, error) {
 		if expires.Valid {
 			u := expires.Time.UTC()
 			l.ExpiresAt = &u
+		}
+		if lastCheck.Valid {
+			u := lastCheck.Time.UTC()
+			l.LastHealthCheck = &u
 		}
 		l.Status = LinkStatus(l.ExpiresAt, now)
 		out = append(out, l)
@@ -189,7 +224,10 @@ type ShardStore interface {
 	GetURL(shortCode string) (string, error)
 	// CreateURL stores one link; expiresAt nil means no expiry (always UTC -
 	// the caller has already validated and converted it, see doShorten).
-	CreateURL(shortCode, originalURL string, creatorID *int64, tagsJSON string, expiresAt *time.Time) error
+	// passwordHash is the bcrypt hash of the optional per-link password ( ""
+	// = no gate) - hashed by the caller through auth.HashPassword, so the
+	// row is gate-ready in the same INSERT (no create-then-update race).
+	CreateURL(shortCode, originalURL string, creatorID *int64, tagsJSON string, expiresAt *time.Time, passwordHash string) error
 	// CreateURLsBatch inserts a batch in ONE transaction (bulk import of
 	// 10-100 URLs). Unique conflicts (short_code already taken) are skipped
 	// per row through ON CONFLICT DO NOTHING - not by rolling back the whole
@@ -321,6 +359,35 @@ type ShardStore interface {
 	// forever). RowsAffected 0 -> sql.ErrNoRows (not owned / unknown code ->
 	// 404 in the handler).
 	SetLinkExpiry(creatorID int64, shortCode string, expiresAt *time.Time) error
+	// SetLinkPassword writes or clears the bcrypt hash (migration 17): "" is
+	// the documented "remove the gate" value. Owner-scoped like the other
+	// link setters -> sql.ErrNoRows for unknown/foreign codes (404).
+	SetLinkPassword(creatorID int64, shortCode, passwordHash string) error
+	// SetLinkFallback writes or clears fallback_url ("" = clear) for an
+	// owned link - where visitors are sent (1s interstitial) while the
+	// destination is broken. sql.ErrNoRows when not owned / unknown.
+	SetLinkFallback(creatorID int64, shortCode, fallbackURL string) error
+	// UpdateLinkHealth stamps health_status + last_health_check plus the
+	// notification bookkeeping (health_notified_at; zero time = NULL so a
+	// healed link can notify again on the next breakage). NOT creator-scoped
+	// - the checker runs system-wide. Unknown code = 0-row UPDATE, not an
+	// error (the row may vanish between the due-list and the check).
+	UpdateLinkHealth(shortCode, status string, checkedAt, notifiedAt time.Time) error
+	// ListLinksHealthDue picks up to limit ACTIVE links that are least
+	// recently checked (never-checked first) - input for the worker's 6h
+	// batch. Read from the PRIMARY so manual API checks count as done work.
+	ListLinksHealthDue(limit int) ([]Link, error)
+	// CreateNotification inserts one in-app notification (navbar bell) and
+	// returns its id. PRIMARY only (creators pattern: shard 0 when sharded).
+	CreateNotification(creatorID int64, typ, shortCode, message string) (int64, error)
+	// ListNotifications returns the newest limit notifications of one
+	// creator (bell dropdown). No notifications = empty slice, not an error.
+	ListNotifications(creatorID int64, limit int) ([]Notification, error)
+	// CountUnreadNotifications drives the red badge on the bell.
+	CountUnreadNotifications(creatorID int64) (int64, error)
+	// MarkNotificationRead is owner-scoped: unknown or foreign id ->
+	// sql.ErrNoRows (404 without leaking ids).
+	MarkNotificationRead(creatorID, id int64) error
 	// DeleteLink removes an OWNED link permanently together with its
 	// click_events history.
 	DeleteLink(creatorID int64, shortCode string) error
@@ -380,6 +447,19 @@ type APIKey struct {
 	Label      sql.NullString
 	CreatedAt  time.Time
 	LastUsedAt sql.NullTime
+}
+
+// Notification is one row of the notifications table (migration 17, navbar
+// bell). Typed as a short string ("link_broken") so new kinds (expiry soon,
+// weekly summary) need no schema change. Message is the Indonesian sentence
+// shown to the user - built by the caller, not the DB.
+type Notification struct {
+	ID        int64     `json:"id"`
+	Type      string    `json:"type"`
+	ShortCode string    `json:"short_code"`
+	Message   string    `json:"message"`
+	Read      bool      `json:"read"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // SocialLink is one entry of the profile's social links, stored as a single
@@ -549,7 +629,7 @@ func (s *SingleStore) DeleteCreatorAccount(id int64) error {
 // and scan errors are returned unchanged.
 func (s *SingleStore) ListLinksByCreator(creatorID int64) ([]Link, error) {
 	rows, err := s.primary.Query(
-		"SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}'), expires_at FROM urls WHERE creator_id = $1 AND is_active = TRUE ORDER BY position ASC, id DESC",
+		"SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}'), expires_at, health_status, last_health_check, fallback_url, (password_hash <> '') AS has_password FROM urls WHERE creator_id = $1 AND is_active = TRUE ORDER BY position ASC, id DESC",
 		creatorID,
 	)
 	if err != nil {
@@ -565,7 +645,7 @@ func (s *SingleStore) ListLinksByCreator(creatorID int64) ([]Link, error) {
 // Same error behavior as ListLinksByCreator: empty slice, not an error.
 func (s *SingleStore) ListLinksByCreatorPrimary(creatorID int64) ([]Link, error) {
 	rows, err := s.primary.Query(
-		"SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}'), expires_at FROM urls WHERE creator_id = $1 ORDER BY position ASC, id DESC",
+		"SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}'), expires_at, health_status, last_health_check, fallback_url, (password_hash <> '') AS has_password FROM urls WHERE creator_id = $1 ORDER BY position ASC, id DESC",
 		creatorID,
 	)
 	if err != nil {
@@ -604,7 +684,7 @@ func NewShardStore(numShards int) *shardStore {
 // creatorID nil = anonymous link (Fase 0-8 stay valid); non-nil = owned by creator.
 // Returns sql.ErrConnDone when the target shard is unavailable; a duplicate
 // short_code surfaces as the driver's unique-violation error.
-func (s *shardStore) CreateURL(shortCode, originalURL string, creatorID *int64, tagsJSON string, expiresAt *time.Time) error {
+func (s *shardStore) CreateURL(shortCode, originalURL string, creatorID *int64, tagsJSON string, expiresAt *time.Time, passwordHash string) error {
 	shardIdx := shortener.ShardKey(shortCode, s.numShards)
 	db, ok := s.shards[shardIdx]
 	if !ok {
@@ -613,7 +693,7 @@ func (s *shardStore) CreateURL(shortCode, originalURL string, creatorID *int64, 
 	if tagsJSON == "" {
 		tagsJSON = "[]"
 	}
-	_, err := db.Exec("INSERT INTO urls (short_code, original_url, creator_id, tags, expires_at) VALUES ($1, $2, $3, $4, $5)", shortCode, originalURL, nullableInt(creatorID), tagsJSON, nullableTime(expiresAt))
+	_, err := db.Exec("INSERT INTO urls (short_code, original_url, creator_id, tags, expires_at, password_hash) VALUES ($1, $2, $3, $4, $5, $6)", shortCode, originalURL, nullableInt(creatorID), tagsJSON, nullableTime(expiresAt), passwordHash)
 	return err
 }
 
@@ -673,7 +753,180 @@ func (s *shardStore) SetLinkExpiry(creatorID int64, shortCode string, expiresAt 
 	return nil
 }
 
-// NOTE (shard mode + Fase 9): the creators table has no sharding design, so all
+// SetLinkPassword routes to the short_code's shard (owner-scoped like
+// SetLinkExpiry). Returns sql.ErrConnDone when the shard is missing,
+// sql.ErrNoRows when the code is unknown or not owned.
+func (s *shardStore) SetLinkPassword(creatorID int64, shortCode, passwordHash string) error {
+	shardIdx := shortener.ShardKey(shortCode, s.numShards)
+	db, ok := s.shards[shardIdx]
+	if !ok {
+		return sql.ErrConnDone
+	}
+	res, err := db.Exec(
+		"UPDATE urls SET password_hash = $3 WHERE short_code = $1 AND creator_id = $2",
+		shortCode, creatorID, passwordHash,
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// SetLinkFallback routes to the short_code's shard; same contract as
+// SetLinkPassword ("" clears the fallback).
+func (s *shardStore) SetLinkFallback(creatorID int64, shortCode, fallbackURL string) error {
+	shardIdx := shortener.ShardKey(shortCode, s.numShards)
+	db, ok := s.shards[shardIdx]
+	if !ok {
+		return sql.ErrConnDone
+	}
+	res, err := db.Exec(
+		"UPDATE urls SET fallback_url = $3 WHERE short_code = $1 AND creator_id = $2",
+		shortCode, creatorID, fallbackURL,
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// UpdateLinkHealth routes to the short_code's shard (see SingleStore for the
+// notification-bookkeeping contract). Unknown code = 0-row UPDATE, not an
+// error. Returns sql.ErrConnDone when the shard is missing.
+func (s *shardStore) UpdateLinkHealth(shortCode, status string, checkedAt, notifiedAt time.Time) error {
+	shardIdx := shortener.ShardKey(shortCode, s.numShards)
+	db, ok := s.shards[shardIdx]
+	if !ok {
+		return sql.ErrConnDone
+	}
+	_, err := db.Exec(
+		"UPDATE urls SET health_status = $2, last_health_check = $3, health_notified_at = $4 WHERE short_code = $1",
+		shortCode, status, checkedAt, nullableTimeZero(notifiedAt),
+	)
+	return err
+}
+
+// ListLinksHealthDue queries every shard (same shape as ListLinksByCreator),
+// merges by last check (never-checked first, oldest next) and trims to
+// limit - a cross-shard approximation of the SingleStore ORDER BY. Missing
+// shards are skipped; no due links anywhere = empty slice, not an error.
+func (s *shardStore) ListLinksHealthDue(limit int) ([]Link, error) {
+	var out []Link
+	for i := 0; i < s.numShards; i++ {
+		db, ok := s.shards[i]
+		if !ok {
+			continue
+		}
+		rows, err := db.Query(
+			"SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}'), expires_at, health_status, last_health_check, fallback_url, (password_hash <> '') AS has_password FROM urls WHERE is_active = TRUE ORDER BY last_health_check NULLS FIRST, id LIMIT $1",
+			limit,
+		)
+		if err != nil {
+			return nil, err
+		}
+		part, err := scanLinks(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, part...)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i].LastHealthCheck, out[j].LastHealthCheck
+		if a == nil {
+			return b != nil
+		}
+		if b == nil {
+			return false
+		}
+		return a.Before(*b)
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// CreateNotification writes to shard 0 (see the NOTE: creators and their
+// notifications have no sharding design; Fase 9 runs on SingleStore).
+func (s *shardStore) CreateNotification(creatorID int64, typ, shortCode, message string) (int64, error) {
+	db, ok := s.shardZero()
+	if !ok {
+		return 0, sql.ErrConnDone
+	}
+	var id int64
+	err := db.QueryRow(
+		"INSERT INTO notifications (creator_id, type, short_code, message) VALUES ($1, $2, $3, $4) RETURNING id",
+		creatorID, typ, shortCode, message,
+	).Scan(&id)
+	return id, err
+}
+
+// ListNotifications reads the creator's feed from shard 0 (see NOTE).
+func (s *shardStore) ListNotifications(creatorID int64, limit int) ([]Notification, error) {
+	db, ok := s.shardZero()
+	if !ok {
+		return nil, sql.ErrConnDone
+	}
+	rows, err := db.Query(
+		"SELECT id, type, short_code, message, read, created_at FROM notifications WHERE creator_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2",
+		creatorID, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Notification{}
+	for rows.Next() {
+		var n Notification
+		if err := rows.Scan(&n.ID, &n.Type, &n.ShortCode, &n.Message, &n.Read, &n.CreatedAt); err != nil {
+			return nil, err
+		}
+		n.CreatedAt = n.CreatedAt.UTC()
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
+// CountUnreadNotifications reads from shard 0 (see NOTE).
+func (s *shardStore) CountUnreadNotifications(creatorID int64) (int64, error) {
+	db, ok := s.shardZero()
+	if !ok {
+		return 0, sql.ErrConnDone
+	}
+	var n int64
+	err := db.QueryRow(
+		"SELECT COUNT(*) FROM notifications WHERE creator_id = $1 AND read = FALSE",
+		creatorID,
+	).Scan(&n)
+	return n, err
+}
+
+// MarkNotificationRead is owner-scoped on shard 0 (see NOTE); unknown or
+// foreign id -> sql.ErrNoRows.
+func (s *shardStore) MarkNotificationRead(creatorID, id int64) error {
+	db, ok := s.shardZero()
+	if !ok {
+		return sql.ErrConnDone
+	}
+	res, err := db.Exec(
+		"UPDATE notifications SET read = TRUE WHERE id = $1 AND creator_id = $2",
+		id, creatorID,
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 // creator reads/writes go to shard 0. Documented simplification: Fase 9 is meant
 // to run on SingleStore (baseline/full); shard mode keeps working for urls.
 func (s *shardStore) shardZero() (*sql.DB, bool) {
@@ -846,7 +1099,7 @@ func (s *shardStore) ListLinksByCreator(creatorID int64) ([]Link, error) {
 			continue
 		}
 		rows, err := db.Query(
-			"SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}'), expires_at FROM urls WHERE creator_id = $1 AND is_active = TRUE ORDER BY position ASC, id DESC",
+			"SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}'), expires_at, health_status, last_health_check, fallback_url, (password_hash <> '') AS has_password FROM urls WHERE creator_id = $1 AND is_active = TRUE ORDER BY position ASC, id DESC",
 			creatorID,
 		)
 		if err != nil {
@@ -1500,6 +1753,16 @@ func nullableTime(v *time.Time) any {
 	return *v
 }
 
+// nullableTimeZero is nullableTime for a non-pointer value: the zero time
+// means "clear the column" (health_notified_at reset when a link heals).
+// The caller MUST already be in UTC.
+func nullableTimeZero(t time.Time) any {
+	if t.IsZero() {
+		return nil
+	}
+	return t
+}
+
 // GetURL implements ShardStore - routes to the correct shard based on short_code hash.
 // Returns sql.ErrConnDone when the shard is unavailable, sql.ErrNoRows when
 // the code is unknown.
@@ -1531,10 +1794,13 @@ func (s *shardStore) GetLink(shortCode string) (Link, error) {
 	var l Link
 	var rules sql.NullString
 	var expires sql.NullTime
+	var lastCheck sql.NullTime
+	var notified sql.NullTime
+	var creatorID sql.NullInt64
 	err := db.QueryRow(
-		"SELECT short_code, original_url, COALESCE(device_rules,'{}'), is_active, expires_at FROM urls WHERE short_code = $1",
+		"SELECT short_code, original_url, COALESCE(device_rules,'{}'), is_active, expires_at, creator_id, health_status, last_health_check, fallback_url, health_notified_at, password_hash FROM urls WHERE short_code = $1",
 		shortCode,
-	).Scan(&l.ShortCode, &l.OriginalURL, &rules, &l.IsActive, &expires)
+	).Scan(&l.ShortCode, &l.OriginalURL, &rules, &l.IsActive, &expires, &creatorID, &l.HealthStatus, &lastCheck, &l.FallbackURL, &notified, &l.PasswordHash)
 	if err != nil {
 		return Link{}, err
 	}
@@ -1543,6 +1809,19 @@ func (s *shardStore) GetLink(shortCode string) (Link, error) {
 		u := expires.Time.UTC()
 		l.ExpiresAt = &u
 	}
+	if lastCheck.Valid {
+		u := lastCheck.Time.UTC()
+		l.LastHealthCheck = &u
+	}
+	if notified.Valid {
+		u := notified.Time.UTC()
+		l.HealthNotifiedAt = &u
+	}
+	if creatorID.Valid {
+		id := creatorID.Int64
+		l.CreatorID = &id
+	}
+	l.HasPassword = l.PasswordHash != ""
 	return l, nil
 }
 
@@ -1579,7 +1858,7 @@ func (s *shardStore) ListLinks() ([]Link, error) {
 		if !ok {
 			continue
 		}
-		rows, err := db.Query("SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}'), expires_at FROM urls ORDER BY id DESC")
+		rows, err := db.Query("SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}'), expires_at, health_status, last_health_check, fallback_url, (password_hash <> '') AS has_password FROM urls ORDER BY id DESC")
 		if err != nil {
 			return nil, err
 		}
@@ -1681,11 +1960,11 @@ func (s *SingleStore) readDB() *sql.DB {
 
 // CreateURL writes to the primary. Returns the driver error as-is; a
 // duplicate short_code surfaces as a unique-constraint violation.
-func (s *SingleStore) CreateURL(shortCode, originalURL string, creatorID *int64, tagsJSON string, expiresAt *time.Time) error {
+func (s *SingleStore) CreateURL(shortCode, originalURL string, creatorID *int64, tagsJSON string, expiresAt *time.Time, passwordHash string) error {
 	if tagsJSON == "" {
 		tagsJSON = "[]"
 	}
-	_, err := s.primary.Exec("INSERT INTO urls (short_code, original_url, creator_id, tags, expires_at) VALUES ($1, $2, $3, $4, $5)", shortCode, originalURL, nullableInt(creatorID), tagsJSON, nullableTime(expiresAt))
+	_, err := s.primary.Exec("INSERT INTO urls (short_code, original_url, creator_id, tags, expires_at, password_hash) VALUES ($1, $2, $3, $4, $5, $6)", shortCode, originalURL, nullableInt(creatorID), tagsJSON, nullableTime(expiresAt), passwordHash)
 	return err
 }
 
@@ -1745,6 +2024,128 @@ func (s *SingleStore) SetLinkExpiry(creatorID int64, shortCode string, expiresAt
 	return nil
 }
 
+// SetLinkPassword writes or clears password_hash on the PRIMARY
+// (read-your-own-writes: the lock badge appears right after saving).
+// Owner-scoped -> sql.ErrNoRows for unknown/not-owned codes (404).
+func (s *SingleStore) SetLinkPassword(creatorID int64, shortCode, passwordHash string) error {
+	res, err := s.primary.Exec(
+		"UPDATE urls SET password_hash = $3 WHERE short_code = $1 AND creator_id = $2",
+		shortCode, creatorID, passwordHash,
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// SetLinkFallback writes or clears fallback_url ("" = clear) for an owned
+// link on the PRIMARY. Same owner-scoped contract as SetLinkPassword.
+func (s *SingleStore) SetLinkFallback(creatorID int64, shortCode, fallbackURL string) error {
+	res, err := s.primary.Exec(
+		"UPDATE urls SET fallback_url = $3 WHERE short_code = $1 AND creator_id = $2",
+		shortCode, creatorID, fallbackURL,
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// UpdateLinkHealth stamps the worker/manual check on the PRIMARY. Not
+// owner-scoped (the checker runs system-wide). A zero notifiedAt clears the
+// notification marker (healed -> the next breakage notifies again); a
+// non-zero value keeps/sets it so a link that stays broken never spams the
+// bell. Unknown code = 0-row UPDATE, not an error: the row may have been
+// deleted between the due-list and the check.
+func (s *SingleStore) UpdateLinkHealth(shortCode, status string, checkedAt, notifiedAt time.Time) error {
+	_, err := s.primary.Exec(
+		"UPDATE urls SET health_status = $2, last_health_check = $3, health_notified_at = $4 WHERE short_code = $1",
+		shortCode, status, checkedAt, nullableTimeZero(notifiedAt),
+	)
+	return err
+}
+
+// ListLinksHealthDue picks the least-recently-checked ACTIVE links from the
+// PRIMARY (NULLs first = never checked) so the worker spreads its 6h window
+// fairly: no link hogs the batch while another never gets verified.
+func (s *SingleStore) ListLinksHealthDue(limit int) ([]Link, error) {
+	rows, err := s.primary.Query(
+		"SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}'), expires_at, health_status, last_health_check, fallback_url, (password_hash <> '') AS has_password FROM urls WHERE is_active = TRUE ORDER BY last_health_check NULLS FIRST, id LIMIT $1",
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return scanLinks(rows)
+}
+
+// CreateNotification inserts an in-app notification on the PRIMARY.
+func (s *SingleStore) CreateNotification(creatorID int64, typ, shortCode, message string) (int64, error) {
+	var id int64
+	err := s.primary.QueryRow(
+		"INSERT INTO notifications (creator_id, type, short_code, message) VALUES ($1, $2, $3, $4) RETURNING id",
+		creatorID, typ, shortCode, message,
+	).Scan(&id)
+	return id, err
+}
+
+// ListNotifications returns the newest limit rows for one creator from the
+// PRIMARY (the bell must show a fresh feed right after a break is detected).
+// Empty result (no rows) is returned as an empty slice, not an error.
+func (s *SingleStore) ListNotifications(creatorID int64, limit int) ([]Notification, error) {
+	rows, err := s.primary.Query(
+		"SELECT id, type, short_code, message, read, created_at FROM notifications WHERE creator_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2",
+		creatorID, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Notification{}
+	for rows.Next() {
+		var n Notification
+		if err := rows.Scan(&n.ID, &n.Type, &n.ShortCode, &n.Message, &n.Read, &n.CreatedAt); err != nil {
+			return nil, err
+		}
+		n.CreatedAt = n.CreatedAt.UTC()
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
+// CountUnreadNotifications drives the bell badge (PRIMARY, read-your-own-
+// writes: marking read updates the count immediately).
+func (s *SingleStore) CountUnreadNotifications(creatorID int64) (int64, error) {
+	var n int64
+	err := s.primary.QueryRow(
+		"SELECT COUNT(*) FROM notifications WHERE creator_id = $1 AND read = FALSE",
+		creatorID,
+	).Scan(&n)
+	return n, err
+}
+
+// MarkNotificationRead owner-scoped: unknown or foreign id -> sql.ErrNoRows
+// (404 without leaking which ids exist).
+func (s *SingleStore) MarkNotificationRead(creatorID, id int64) error {
+	res, err := s.primary.Exec(
+		"UPDATE notifications SET read = TRUE WHERE id = $1 AND creator_id = $2",
+		id, creatorID,
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 // GetURL reads from the replica when enabled, otherwise the primary.
 // Returns sql.ErrNoRows when the code is unknown (404 in the redirect
 // handler).
@@ -1758,17 +2159,24 @@ func (s *SingleStore) GetURL(shortCode string) (string, error) {
 }
 
 // GetLink reads the full redirect row (original_url + device_rules +
-// is_active) - needed by the Smart Link redirect path to route by device and
-// to answer 410 for disabled links. Same read path as GetURL, including its
-// error contract (sql.ErrNoRows when the code is unknown).
+// is_active + expires_at + migration 17: creator_id, health_status,
+// fallback_url, health_notified_at, password_hash) - needed by the Smart
+// Link redirect path to route by device, to answer 410 for disabled links,
+// to gate the password form, and by the manual health trigger for the owner
+// check. Same read path as GetURL, including its error contract
+// (sql.ErrNoRows when the code is unknown). The password_hash selected here
+// NEVER reaches JSON (Link.PasswordHash is json:"-").
 func (s *SingleStore) GetLink(shortCode string) (Link, error) {
 	var l Link
 	var rules sql.NullString
 	var expires sql.NullTime
+	var lastCheck sql.NullTime
+	var notified sql.NullTime
+	var creatorID sql.NullInt64
 	err := s.readDB().QueryRow(
-		"SELECT short_code, original_url, COALESCE(device_rules,'{}'), is_active, expires_at FROM urls WHERE short_code = $1",
+		"SELECT short_code, original_url, COALESCE(device_rules,'{}'), is_active, expires_at, creator_id, health_status, last_health_check, fallback_url, health_notified_at, password_hash FROM urls WHERE short_code = $1",
 		shortCode,
-	).Scan(&l.ShortCode, &l.OriginalURL, &rules, &l.IsActive, &expires)
+	).Scan(&l.ShortCode, &l.OriginalURL, &rules, &l.IsActive, &expires, &creatorID, &l.HealthStatus, &lastCheck, &l.FallbackURL, &notified, &l.PasswordHash)
 	if err != nil {
 		return Link{}, err
 	}
@@ -1777,6 +2185,19 @@ func (s *SingleStore) GetLink(shortCode string) (Link, error) {
 		u := expires.Time.UTC()
 		l.ExpiresAt = &u
 	}
+	if lastCheck.Valid {
+		u := lastCheck.Time.UTC()
+		l.LastHealthCheck = &u
+	}
+	if notified.Valid {
+		u := notified.Time.UTC()
+		l.HealthNotifiedAt = &u
+	}
+	if creatorID.Valid {
+		id := creatorID.Int64
+		l.CreatorID = &id
+	}
+	l.HasPassword = l.PasswordHash != ""
 	return l, nil
 }
 
@@ -1797,7 +2218,7 @@ func (s *SingleStore) GetShard(shortCode string) *sql.DB {
 // (Fase 8 dashboard reads from the read replica). A query error returns
 // nil; no rows yields an empty slice, not an error.
 func (s *SingleStore) ListLinks() ([]Link, error) {
-	rows, err := s.readDB().Query("SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}'), expires_at FROM urls ORDER BY id DESC")
+	rows, err := s.readDB().Query("SELECT short_code, original_url, click_count, unique_click_count, position, is_featured, is_active, COALESCE(tags,'[]'), COALESCE(device_rules,'{}'), expires_at, health_status, last_health_check, fallback_url, (password_hash <> '') AS has_password FROM urls ORDER BY id DESC")
 	if err != nil {
 		return nil, err
 	}

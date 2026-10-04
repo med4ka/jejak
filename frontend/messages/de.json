@@ -477,6 +477,8 @@
       "changeReverted": "Fehlgeschlagen: Änderungen zurückgesetzt.",
       "qrZipFailed": "QR-ZIP konnte nicht erstellt werden.",
       "uploadPhotoFailed": "Foto konnte nicht hochgeladen werden",
+      "avatarTooLarge": "Foto zu groß (max. 2 MB)",
+      "avatarBadFormat": "Nicht unterstütztes Format: JPG, PNG oder WebP verwenden",
       "saveProfile": "Speichern fehlgeschlagen"
     },
     "analytics": {

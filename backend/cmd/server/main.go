@@ -16,6 +16,7 @@ import (
 	"jejak/internal/db"
 	"jejak/internal/env"
 	"jejak/internal/handler"
+	"jejak/internal/health"
 	"jejak/internal/middleware"
 	"jejak/internal/migrate"
 	"jejak/internal/ratelimit"
@@ -159,6 +160,19 @@ func main() {
 	// Anonymous shorten: 30 requests/minute per IP, capping spam-link
 	// generation; the API-key path is not affected (its own per-key bucket).
 	h.ShortenLimiter = ratelimit.NewLimiterWithMax(30)
+	// Password verify (migration 17): 10 attempts/minute per IP+code -
+	// bcrypt runs on every wrong guess, so the form needs a CPU budget;
+	// successes reset the bucket (see Handler.VerifyLimiter).
+	h.VerifyLimiter = ratelimit.NewLimiterWithMax(10)
+	// Manual health check (migration 17): 10 checks/minute per IP: each one
+	// makes a live outbound request (5s worst case) with its own budget
+	// next to the worker batch (see Handler.HealthTriggerLimiter).
+	h.HealthTriggerLimiter = ratelimit.NewLimiterWithMax(10)
+
+	// Health checker for the manual "check now" trigger: the worker runs the
+	// same Checker from cmd/worker/health.go (shared code, one classification
+	// rule). Cache lets a status flip evict the redirect payload immediately.
+	h.Checker = &health.Checker{Store: store, Cache: c, Logger: log.Default()}
 
 	// authH wraps a session-required handler (Phase 9): anonymous requests get
 	// 401 BEFORE the handler runs; the handler reads the creator id from the
@@ -192,6 +206,13 @@ func main() {
 	// Optional auth: anonymous can shorten, logged-in auto-owns the link
 	// (creator id resolved from context, nil for anonymous).
 	mux.Handle("POST /api/shorten", middleware.OptionalAuth(h.Auth)(http.HandlerFunc(h.HandleShorten)))
+
+	// Deep link tools (2026-10-04). Generate = pure URL lookup, no auth and
+	// no rate limit (single parse, zero side effects); WhatsApp = optional
+	// auth so a logged-in user's auto-shortened link is owned by them, with
+	// the shorten path sharing the /api/shorten rate bucket.
+	mux.HandleFunc("POST /api/deeplink/generate", h.HandleDeepLinkGenerate)
+	mux.Handle("POST /api/tools/whatsapp-link", middleware.OptionalAuth(h.Auth)(http.HandlerFunc(h.HandleWhatsAppLink)))
 
 	mux.HandleFunc("POST /api/register", func(w http.ResponseWriter, r *http.Request) {
 		h.HandleRegister(w, r)
@@ -266,6 +287,20 @@ func main() {
 		h.HandleUpdateLink(r.PathValue("short_code"), w, r)
 	})))
 
+	// Manual health check (migration 17): authH first (401 without a
+	// session), ownership + rate limit inside the handler - the ownership
+	// check must precede the outbound probe (SSRF-shaped abuse), so it
+	// cannot live in middleware.
+	mux.Handle("POST /api/links/{short_code}/check-health", authH(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.HandleCheckHealth(r.PathValue("short_code"), w, r)
+	})))
+
+	// In-app notifications (migration 17): navbar bell feed + read marker.
+	mux.Handle("GET /api/notifications", authH(h.HandleListNotifications))
+	mux.Handle("PUT /api/notifications/{id}/read", authH(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.HandleMarkNotificationRead(r.PathValue("id"), w, r)
+	})))
+
 	mux.Handle("GET /api/analytics/clicks-by-day", authH(h.HandleClicksByDay))
 
 	// Analytics depth (2026-09-30): device/referrer breakdown plus a bounded
@@ -300,15 +335,16 @@ func main() {
 
 	mux.Handle("POST /api/profile/avatar", authH(h.HandleUploadAvatar))
 
-	// Static file server for avatar uploads: /uploads/avatars/{id}.{ext}.
-	// The FileServer root is http.Dir("uploads") + StripPrefix("/uploads/"),
+	// Static file server for avatar uploads: /uploads/avatars/{id}-{ms}.{ext}
+	// (versioned per upload, see newAvatarPaths). The FileServer root is http.Dir("uploads") + StripPrefix("/uploads/"),
 	// NOT http.Dir(".") + StripPrefix("/"): the previous setup rooted the
 	// entire working directory and depended only on responses staying under
 	// /uploads/, which was fragile: a single ServeMux path-cleaning mistake
 	// could expose .env, source code, and other repository data. With root
 	// "uploads" and the correct "/uploads/" strip, only the uploads/ subtree
-	// can be served; database paths ("/uploads/avatars/1.jpg") are unchanged,
-	// which is the safest area to confirm: the mux pattern accepts the
+	// can be served; database paths ("/uploads/avatars/1-<ms>.jpg") are the
+	// same shape the mux pattern accepts, which is the safest area to
+	// confirm: the mux pattern accepts the
 	// prefix, the strip removes it, and the FileServer serves paths relative
 	// to the uploads directory. Trade-off: absolute paths outside uploads
 	// (e.g. /uploads/../.env) are now cleaned by ServeMux to "/.env"
@@ -320,7 +356,15 @@ func main() {
 	if err := os.MkdirAll("uploads/avatars", 0750); err != nil {
 		log.Fatal("Failed to create uploads/avatars:", err)
 	}
-	mux.Handle("GET /uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir("uploads"))))
+	mux.Handle("GET /uploads/", cacheRevalidate(http.StripPrefix("/uploads/", http.FileServer(http.Dir("uploads")))))
+
+	// Password verify (migration 17): POST target of the /r/{code} form.
+	// No session auth - the link itself is the resource - and the handler
+	// rate-limits per IP+code before running bcrypt. The literal "/verify"
+	// segment outranks nothing here (GET /r/ is a different method).
+	mux.Handle("POST /r/{short_code}/verify", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.HandlePasswordVerify(r.PathValue("short_code"), w, r)
+	}))
 
 	mux.HandleFunc("GET /r/", func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
@@ -357,4 +401,19 @@ func main() {
 	}
 	log.Printf("Server starting on :%s (mode=%s)", port, mode)
 	log.Fatal(srv.ListenAndServe())
+}
+
+// cacheRevalidate sets Cache-Control: no-cache on uploaded files (avatars).
+// Without any Cache-Control the browser falls back to heuristic freshness
+// (RFC 7234 4.2.2: 10% of the age implied by Last-Modified) and may keep
+// showing a replaced image from its cache without ever asking the server.
+// "no-cache" still allows storing the bytes, but every reuse must first
+// revalidate via If-Modified-Since; http.FileServer answers 304 when the
+// file is unchanged, so repeat views stay cheap while a replaced or new
+// file is always fetched.
+func cacheRevalidate(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		next.ServeHTTP(w, r)
+	})
 }
