@@ -23,7 +23,7 @@ export function ShareButton({ onClick }) {
       onClick={onClick}
       whileHover={{ y: -2, transition: SPRING }}
       whileTap={{ scale: 0.97, y: 0, transition: SPRING }}
-      className="inline-flex shrink-0 items-center gap-2 rounded-full border-2 border-ink bg-flash-yellow px-5 py-2.5 text-sm font-bold text-ink shadow-[4px_4px_0px_#1C1A12] transition-shadow duration-150 hover:shadow-[7px_7px_0px_#1C1A12] focus:outline-none focus-visible:ring-2 focus-visible:ring-flash-coral"
+      className="inline-flex shrink-0 items-center gap-2 rounded-full border-2 border-ink bg-flash-yellow px-5 py-2.5 text-sm font-bold text-ink shadow-[4px_4px_0px_#1C1A12] transition-shadow duration-150 hover:shadow-[7px_7px_0px_#1C1A12] focus:outline-hidden focus-visible:ring-2 focus-visible:ring-flash-coral"
     >
       <Share2 size={16} aria-hidden="true" />
       {t("forms.share.title")}
@@ -113,7 +113,7 @@ export default function ShareModal({ username, onClose }) {
         exit={{ opacity: 0 }}
         transition={SPRING}
         onClick={onClose}
-        className="pointer-events-auto absolute inset-0 bg-ink/40 backdrop-blur-sm"
+        className="pointer-events-auto absolute inset-0 bg-ink/40 backdrop-blur-xs"
         aria-hidden="true"
       />
       <motion.div
@@ -144,7 +144,7 @@ export default function ShareModal({ username, onClose }) {
             readOnly
             value={url}
             onFocus={(e) => e.target.select()}
-            className="min-w-0 flex-1 rounded-xl border-2 border-ink bg-print-white px-3 py-2 font-mono text-xs text-ink focus:border-flash-yellow focus:outline-none"
+            className="min-w-0 flex-1 rounded-xl border-2 border-ink bg-print-white px-3 py-2 font-mono text-xs text-ink focus:border-flash-yellow focus:outline-hidden"
             aria-label={t("forms.share.urlAriaLabel")}
           />
           <button

@@ -409,7 +409,7 @@ export default function NavbarClient({ isLoggedIn }) {
                       aria-haspopup="menu"
                       aria-label={tr("nav.aria.accountMenu")}
                       title={username ? tr("nav.account.title", { username }) : tr("nav.account.titleFallback")}
-                      className={`flex items-center gap-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-flash-coral`}
+                      className={`flex items-center gap-1 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-flash-coral`}
                     >
                       <span
                         className={`flex h-10 w-10 items-center justify-center overflow-hidden rounded-full text-sm font-bold ${t.navCircle}`}

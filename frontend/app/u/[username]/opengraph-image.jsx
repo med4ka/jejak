@@ -205,7 +205,8 @@ function Card({ profile, avatar, titleFont, bodyFont }) {
   );
 }
 
-export default async function OpengraphImage({ params }) {
+export default async function OpengraphImage(props) {
+  const params = await props.params;
   const [profile, sg, ws] = await Promise.all([
     fetchProfile(params.username),
     googleFont("Space Grotesk", 700),

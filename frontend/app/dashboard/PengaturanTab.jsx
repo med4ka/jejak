@@ -58,7 +58,7 @@ export default function PengaturanTab({ st }) {
   const [deletePw, setDeletePw] = useState("");
   const [deleteBusy, setDeleteBusy] = useState(false);
 
-  const inputCls = `w-full rounded-xl border-2 border-ink bg-white px-3 py-2 text-sm focus:border-flash-yellow focus:ring-2 focus:ring-flash-yellow/30 focus:outline-none transition-all duration-150`;
+  const inputCls = `w-full rounded-xl border-2 border-ink bg-white px-3 py-2 text-sm focus:border-flash-yellow focus:ring-2 focus:ring-flash-yellow/30 focus:outline-hidden transition-all duration-150`;
   const primaryBtn = `rounded-full border-2 border-ink ${st.accent} px-4 py-2.5 text-sm font-bold transition-[filter] duration-150 hover:brightness-95`;
 
   async function onSubmitEmail(e) {

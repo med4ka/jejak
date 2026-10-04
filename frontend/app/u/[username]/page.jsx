@@ -28,7 +28,8 @@ async function fetchProfile(username) {
   return res.json();
 }
 
-export async function generateMetadata({ params }) {
+export async function generateMetadata(props) {
+  const params = await props.params;
   const fallback = {
     title: "Profil tidak ditemukan: Jejak",
     description: "Halaman kreator Jejak.",
@@ -56,7 +57,8 @@ export async function generateMetadata({ params }) {
   }
 }
 
-export default async function CreatorPage({ params }) {
+export default async function CreatorPage(props) {
+  const params = await props.params;
   const profile = await fetchProfile(params.username);
   if (!profile) {
     notFound();

@@ -124,7 +124,7 @@ export default function ConfirmModal({
               if (!busy) onClose();
             }}
             aria-hidden="true"
-            className="absolute inset-0 bg-ink/40 backdrop-blur-sm"
+            className="absolute inset-0 bg-ink/40 backdrop-blur-xs"
           />
           <motion.div
             ref={panelRef}
@@ -153,7 +153,7 @@ export default function ConfirmModal({
                   disabled={busy}
                   autoComplete="off"
                   spellCheck={false}
-                  className="mt-1 w-full rounded-xl border-2 border-ink bg-white px-3 py-2 font-mono text-sm focus:border-flash-yellow focus:ring-2 focus:ring-flash-yellow/30 focus:outline-none transition-all duration-150 disabled:opacity-60"
+                  className="mt-1 w-full rounded-xl border-2 border-ink bg-white px-3 py-2 font-mono text-sm focus:border-flash-yellow focus:ring-2 focus:ring-flash-yellow/30 focus:outline-hidden transition-all duration-150 disabled:opacity-60"
                 />
               </label>
             )}

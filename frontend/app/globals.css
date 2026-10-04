@@ -1,6 +1,20 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* Tailwind CSS v4 (upgrade 2026-10-04): the three @tailwind directives are
+   replaced by a single @import. @config keeps tailwind.config.js as the
+   source of truth for content scanning (./lib MUST be scanned: themes.js
+   holds bg-[#...] literals) and for the Instant Print theme.extend tokens —
+   migrating them to @theme is possible later without visual risk. */
+@import "tailwindcss";
+@config "../tailwind.config.js";
+
+/* Tailwind v4 Preflight compat (keeps v3 behavior, see upgrade guide):
+   buttons default to cursor:default in v4; Jejak's CTAs are all <button>
+   and always felt like links → restore cursor:pointer. */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
 
 /* The former signature element (.laminate-strip) was removed together with the
    Laminated Pass palette. The current signature (§3 "Instant Frame"): a thick

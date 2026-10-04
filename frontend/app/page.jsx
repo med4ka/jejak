@@ -715,7 +715,7 @@ function DemoInteractive({ st }) {
             maxLength={30}
             onChange={(e) => setSlug(e.target.value)}
             placeholder={t("landing.demo.slugPlaceholder")}
-            className={`w-full min-w-0 px-3 py-2.5 font-mono text-sm font-bold ${st.card} focus:border-flash-yellow focus:ring-2 focus:ring-flash-yellow/30 focus:outline-none transition-all duration-150`}
+            className={`w-full min-w-0 px-3 py-2.5 font-mono text-sm font-bold ${st.card} focus:border-flash-yellow focus:ring-2 focus:ring-flash-yellow/30 focus:outline-hidden transition-all duration-150`}
           />
         </div>
         <p className={`mt-3 font-mono text-sm font-bold ${st.text}`}>{display}</p>

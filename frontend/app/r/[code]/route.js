@@ -223,11 +223,13 @@ async function proxy(req, code) {
   return new NextResponse(body, { status: goRes.status, headers: out });
 }
 
-export async function GET(req, { params }) {
+export async function GET(req, props) {
+  const params = await props.params;
   return proxy(req, params?.code);
 }
 
 // HEAD is used by some crawlers/monitors: identical path and headers.
-export async function HEAD(req, { params }) {
+export async function HEAD(req, props) {
+  const params = await props.params;
   return proxy(req, params?.code);
 }

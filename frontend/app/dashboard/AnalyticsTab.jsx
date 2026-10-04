@@ -204,7 +204,7 @@ export default function AnalyticsTab({ st, range, onRange }) {
               key={m.mode}
               href={`/api/analytics/export?mode=${m.mode}&range=${encodeURIComponent(range)}`}
               download
-              className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border-2 border-ink bg-white px-4 py-2 text-sm font-bold text-ink transition-transform duration-150 hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-flash-yellow`}
+              className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border-2 border-ink bg-white px-4 py-2 text-sm font-bold text-ink transition-transform duration-150 hover:-translate-y-0.5 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-flash-yellow`}
             >
               <Download size={14} aria-hidden="true" />
               {m.label}

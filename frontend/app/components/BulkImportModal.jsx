@@ -9,7 +9,7 @@ import { sameOriginShortUrl } from "../../lib/shortlink";
 import { useTranslation } from "../../lib/I18nProvider";
 
 const input =
-  "w-full rounded-xl border-2 border-ink bg-print-white px-3 py-2 text-sm text-ink placeholder:text-muted focus:border-flash-yellow focus:ring-2 focus:ring-flash-yellow/30 focus:outline-none transition-all duration-150";
+  "w-full rounded-xl border-2 border-ink bg-print-white px-3 py-2 text-sm text-ink placeholder:text-muted focus:border-flash-yellow focus:ring-2 focus:ring-flash-yellow/30 focus:outline-hidden transition-all duration-150";
 
 // Bulk import modal (link management, 2026-09-30): paste 10-100 URLs (one per
 // line) → POST /api/links/bulk. The per-line ✓/✗ preview is computed on the

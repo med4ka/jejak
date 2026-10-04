@@ -34,7 +34,7 @@ export default function ShortenForm({ st, onSuccess }) {
   // min-w-0: lets the input inside the flex row shrink below its intrinsic
   // width (320px audit: without it, input plus button can widen until they
   // trigger horizontal scrolling).
-  const inputThemed = `w-full min-w-0 ${st.radius} ${st.borderW} ${st.border} ${st.card} px-4 py-2.5 text-sm ${st.text} ${st.placeholder} focus:border-flash-yellow focus:ring-2 focus:ring-flash-yellow/30 focus:outline-none transition-all duration-150`;
+  const inputThemed = `w-full min-w-0 ${st.radius} ${st.borderW} ${st.border} ${st.card} px-4 py-2.5 text-sm ${st.text} ${st.placeholder} focus:border-flash-yellow focus:ring-2 focus:ring-flash-yellow/30 focus:outline-hidden transition-all duration-150`;
 
   async function onSubmit(e) {
     e.preventDefault();

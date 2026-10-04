@@ -29,7 +29,7 @@ const MESSAGES = { id: idMessages, en: enMessages, de: deMessages };
 // browser tab, link previews, and WhatsApp/Twitter/Discord scrapers follow
 // the NEXT_LOCALE cookie instead of always shipping the Indonesian copy.
 export async function generateMetadata() {
-  const locale = getLocale(cookies().get("NEXT_LOCALE")?.value);
+  const locale = getLocale((await cookies()).get("NEXT_LOCALE")?.value);
   const messages = loadMessages(locale);
   const title = messages.metadata?.title || "Jejak";
   const description = messages.metadata?.description || "Jejak: link-in-bio untuk kreator.";
@@ -58,8 +58,8 @@ const body = Work_Sans({ subsets: ["latin"], variable: "--font-body" });
 const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono" });
 const caption = Caveat({ subsets: ["latin"], weight: ["600"], variable: "--font-caption" });
 
-export default function RootLayout({ children }) {
-  const locale = getLocale(cookies().get("NEXT_LOCALE")?.value);
+export default async function RootLayout({ children }) {
+  const locale = getLocale((await cookies()).get("NEXT_LOCALE")?.value);
   const messages = MESSAGES[locale] || MESSAGES[DEFAULT_LOCALE];
   return (
     <html lang={locale} className={`${display.variable} ${blackhead.variable} ${body.variable} ${mono.variable} ${caption.variable}`}>

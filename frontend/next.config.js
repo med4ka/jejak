@@ -36,6 +36,12 @@ function warnIfServerAlreadyRunning(port) {
 warnIfServerAlreadyRunning(3000);
 
 module.exports = {
+  // Turbopack (default di Next 16): lockfile & file watching harus scoped ke
+  // folder frontend ini — tanpa ini Next mengira repo root ada di atasnya
+  // (warning "ignored package-lock.json outside the current Git repository").
+  turbopack: {
+    root: __dirname,
+  },
   // Avatar uploads are stored locally by Go (POST /api/profile/avatar); the DB
   // keeps the relative path "/uploads/...". This rewrite lets avatar images
   // load from any page (dashboard + public page) through the Next origin,

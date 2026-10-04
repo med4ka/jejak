@@ -9,8 +9,8 @@ export const metadata = {
 
 // Stub page (footer audit). Placeholder content: official copy to follow;
 // the point is that the footer Company link is not dead / does not 404.
-export default function ContactPage() {
-  const { t } = getServerTranslation();
+export default async function ContactPage() {
+  const { t } = await getServerTranslation();
   const [beforeEmail, afterEmail] = t("contact.paragraph2").split("{email}");
   return (
     <main className="mx-auto w-full max-w-2xl px-4 pb-16 pt-24 sm:px-6">

@@ -9,8 +9,8 @@ export const metadata = {
 
 // Stub page (footer audit). Placeholder content: official copy to follow;
 // the point is that the footer Legal link is not dead / does not 404.
-export default function TermsPage() {
-  const { t } = getServerTranslation();
+export default async function TermsPage() {
+  const { t } = await getServerTranslation();
   return (
     <main className="mx-auto w-full max-w-2xl px-4 pb-16 pt-24 sm:px-6">
       <article className="rounded-xl border-2 border-ink bg-print-white p-6 shadow-[4px_4px_0px_#1C1A12] sm:p-8">

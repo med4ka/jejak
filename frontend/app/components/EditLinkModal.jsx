@@ -7,7 +7,7 @@ import { SPRING } from "../../lib/animations";
 import { formatLocal, fromInputValue, minuteKey, toInputValue } from "../../lib/expiry";
 
 const input =
-  "w-full rounded-xl border-2 border-ink bg-print-white px-3 py-2 text-sm text-ink placeholder:text-muted focus:border-flash-yellow focus:ring-2 focus:ring-flash-yellow/30 focus:outline-none transition-all duration-150";
+  "w-full rounded-xl border-2 border-ink bg-print-white px-3 py-2 text-sm text-ink placeholder:text-muted focus:border-flash-yellow focus:ring-2 focus:ring-flash-yellow/30 focus:outline-hidden transition-all duration-150";
 
 // Edit link modal (Smart Link): set per-device destination URLs (iOS/Android)
 // plus tags in a single save (endpoint PUT /api/links/{short_code},

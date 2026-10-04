@@ -6,7 +6,8 @@ const GO_API_URL = process.env.GO_API_URL || "http://localhost:8081";
 // forwarded (Go rejects unauthenticated requests and verifies ownership: a
 // link not owned returns 404). The static "reorder" segment wins over this
 // dynamic route in Next, so /api/links/reorder keeps its own proxy.
-export async function PUT(req, { params }) {
+export async function PUT(req, props) {
+  const params = await props.params;
   const shortCode = params.short_code;
   const cookie = req.headers.get("cookie") || "";
   let body;

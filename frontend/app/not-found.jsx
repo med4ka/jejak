@@ -13,8 +13,8 @@ export const metadata = {
 // global PageTransition in layout.jsx (the layout itself stays untouched).
 // Responsive: w-full on mobile (buttons stack at full width), a row from sm
 // upward.
-export default function NotFound() {
-  const { t } = getServerTranslation();
+export default async function NotFound() {
+  const { t } = await getServerTranslation();
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-print-white px-4 py-24 text-center sm:px-6">
       <div className="w-full max-w-md">

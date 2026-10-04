@@ -4,7 +4,8 @@ const GO_API_URL = process.env.GO_API_URL || "http://localhost:8081";
 
 // Proxy API key deletion -> Go DELETE /api/keys/{id}. The session cookie is
 // forwarded; Go verifies key ownership (a key not owned returns 404).
-export async function DELETE(req, { params }) {
+export async function DELETE(req, props) {
+  const params = await props.params;
   const cookie = req.headers.get("cookie") || "";
   let goRes;
   try {

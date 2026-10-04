@@ -11,6 +11,49 @@ Append-only log. Jangan hapus entry lama.
 
 ---
 
+## 2026-10-04: Upgrade Next.js 14→16 + Tailwind 3→4
+**Status:** Done (branch `upgrade/next16-tailwind4`; build hijau 31 routes, smoketest Go 12/12, i18n ID/EN/DE terverifikasi, auth flow via Next API 201/200/200, dev console 0 error, npm audit **0 vulnerabilities**; rollback point commit `acf53b87aa6431781eefdd9b5b3d2f4d64e453e6`)
+
+**Versi:**
+| Paket | Sebelum | Sesudah |
+|---|---|---|
+| next | 14.2.35 (critical RCE advisories) | **16.3.8** (Turbopack default) |
+| react / react-dom | 18.3.1 | **19.2** (React canary via Next 16) |
+| tailwindcss | 3.4.19 | **4.3.3** (`@tailwindcss/postcss` 4.3.3, autoprefixer dihapus — sudah dibundel) |
+| npm audit | 6 (1 critical next + 5 high rantai tailwind 3) | **0 vulnerabilities** |
+
+**Codemod:** `npx @next/codemod@canary next-async-request-api .` — **6 file ok, 0 errors**: `app/layout.jsx` (RootLayout + generateMetadata → `await cookies()`), `lib/serverI18n.js` (diberi error marker → fix manual async), `app/u/[username]/page.jsx` (page + generateMetadata → `await props.params`), `app/r/[code]/route.js` (GET/HEAD), `app/api/keys/[id]/route.js`, `app/api/links/[short_code]/route.js` (→ `await props.params`).
+
+**Breaking changes Next 15/16 yang di-handle:**
+- **Async Request APIs** (sync access dihapus total di 16): semua `cookies()` → `await cookies()`; semua `params` page/route handler/opengraph-image → `await`. Fix manual di luar codemod: `lib/serverI18n.js` → `export async function getServerTranslation()` + 4 pemanggil (`privacy`, `terms`, `contact` page + `not-found.jsx`) → komponen async + `await`; `app/u/[username]/opengraph-image.jsx` (terlewat codemod) → `await props.params`.
+- **Turbopack default** (`next build`/`dev`): `next.config.js` ditambah `turbopack: { root: __dirname }` (menghilangkan warning lockfile di luar repo; tanpa webpack custom → aman).
+- React 19: tidak ada pemakaian `useFormState`/`defaultProps`/`ReactDOM.render` (terverifikasi grep → 0).
+
+**Breaking changes Tailwind 3→4 yang di-handle:**
+- `globals.css`: `@tailwind base/components/utilities` → `@import "tailwindcss"` + **`@config "../tailwind.config.js"`** (jalur yang disarankan guide utk project custom: config content `./lib` + theme.extend Instant Print tetap jadi single source of truth → risiko visual minimal). Preflight compat: `cursor: pointer` utk `<button>` (v4 default-nya `cursor: default`).
+- `postcss.config.js`: plugin `tailwindcss`+`autoprefixer` → **`@tailwindcss/postcss`**.
+- Rename kelas sesuai scale v4 (v3 look dipertahankan): **17×** `focus:outline-none` → `focus:outline-hidden` (11 file), **4×** `rounded-sm` → `rounded-xs` (DashboardClient), **2×** `backdrop-blur-sm` → `backdrop-blur-xs` (ConfirmModal, ShareModal). Tidak ada: `@apply`, `bg-gradient-to-*`, `shadow-sm`, bare `ring`, `bg-opacity-*` (0 match — tak perlu diubah).
+- Default border color v4 (`currentColor`): aman — semua `border-2` di project selalu punya color token (`border-ink` / arbitrary `border-[#hex]` dari `lib/themes.js`); bare `border` = 0 match.
+
+**File diubah (26 + 2 generated):** codemod 6 (di atas) · fix manual: `opengraph-image.jsx`, `privacy/page.jsx`, `terms/page.jsx`, `contact/page.jsx`, `not-found.jsx` · rename kelas: `page.jsx` (landing), `dashboard/{DashboardClient,PengaturanTab,AnalyticsTab}.jsx`, `components/{AuthModal,BulkImportModal,ConfirmModal,EditLinkModal,NavbarClient,ShareModal,ShortenForm}.jsx` · konfigurasi: `package.json` (+lock), `postcss.config.js`, `globals.css`, `next.config.js` · generated Next 16: `AGENTS.md`, `CLAUDE.md` (agent rules — Next menulis ulang saat `next dev`, di-commit agar tree clean).
+
+**Verifikasi:**
+- `npm run build` hijau — Next.js 16.3.8 (Turbopack), 31 routes, 31/31 static pages.
+- Halaman via dev: `/` 200 (62.8 KB), `/app` `/dashboard` `/terms` `/privacy` `/contact` 200, `/u/{ghifari,medaka,medaka_,web0b07b6}` 200 (profil render + title benar), `/r/itb3290279571800` **302 → https://example.com/3**, custom 404 → status 404.
+- i18n cookie `NEXT_LOCALE`: landing `<title>` id/en/de berbeda ✓; `/terms` h1: "Syarat & Ketentuan" / "Terms & Conditions" / "Nutzungs- & Geschäftsbedingungen" ✓.
+- Auth via Next API: `/api/register` 201 (perlu field `display_name`), `/api/login` 200 + cookie, `/api/profile` (auth) 200.
+- **Go smoketest `BASE_URL=localhost:8082` → 12/12 passed** (292ms).
+- dev console: **0 error/warning** (log scan semua request 200/302/404/400-validasi).
+- **No-visual-change evidence** (tanpa browser): CSS v3 (backup `.next`) vs v4 — **34 vs 34 rules `data-profile-theme` (identik)** + semua token utilities kunci (`bg-print-white`, `text-ink`, `font-display`, `border-ink`, arbitrary `shadow-[4px...]`, dll) ada di keduanya; 11 tema rules lengkap di CSS output.
+- `npm audit` → **0 vulnerabilities** (target keamanan upgrade tercapai; critical next@14 hilang + rantai tailwind 3 ikut terhapus).
+
+**Catatan operasional:** dev backend Go = `PORT=8082` (8080/8081 dipakai proses lain); Next dev harus dijalankan dengan `GO_API_URL=http://localhost:8082` (tanpa `.env` frontend, default-nya 8081 = XAMPP).
+
+**TODO:**
+- Cek visual manual di browser (landing/dashboard/theme picker 11 tema) — bukti otomatis CSS identik sudah kuat, tapi screenshot tak memungkinkan dari CLI.
+- Tailwind 4: pertimbangkan migrasi `tailwind.config.js` → `@theme` CSS-native di task terpisah (kini lewat `@config`, didukung resmi tapi deprecated path jangka panjang).
+- Tailwind 4 butuh browser modern (Chrome 111+/Safari 16.4+/Firefox 128+) — sesuaikan target browser bila ada user lama.
+
 ## 2026-10-03: Security audit + comprehensive testing
 **Status:** Done (audit 13 butir §10.2 + §10.3 dengan bukti file:baris, 9 fix keamanan diterapkan, 8 test keamanan baru, 4 test coverage utilitas, 8 skenario integration hijau, race hijau, smoke 12/12; laporan lengkap di `SECURITY_CHECKLIST.md`)
 

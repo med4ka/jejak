@@ -18,8 +18,9 @@ export function loadMessages(locale) {
   return MESSAGES[locale] || MESSAGES[DEFAULT_LOCALE];
 }
 
-export function getServerTranslation() {
-  const locale = getLocale(cookies().get("NEXT_LOCALE")?.value);
+export async function getServerTranslation() {
+  const cookieStore = await cookies();
+  const locale = getLocale(cookieStore.get("NEXT_LOCALE")?.value);
   const messages = loadMessages(locale);
   return {
     locale,

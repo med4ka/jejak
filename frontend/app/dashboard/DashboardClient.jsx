@@ -221,7 +221,7 @@ export default function DashboardClient() {
   // preset picker and (2) the PUT /api/profile payload. Styling keeps using
   // the classic preset.
   const st = themeStyles("classic");
-  const inputThemed = `w-full ${st.radius} ${st.borderW} ${st.border} ${st.card} px-3 py-2 text-sm ${st.placeholder} focus:border-flash-yellow focus:ring-2 focus:ring-flash-yellow/30 focus:outline-none transition-all duration-150`;
+  const inputThemed = `w-full ${st.radius} ${st.borderW} ${st.border} ${st.card} px-3 py-2 text-sm ${st.placeholder} focus:border-flash-yellow focus:ring-2 focus:ring-flash-yellow/30 focus:outline-hidden transition-all duration-150`;
   const welcomeStep1 = t("dashboard.links.welcome.step1").split("{action}");
   const welcomeStep2 = t("dashboard.links.welcome.step2").split("{action}");
 
@@ -759,7 +759,7 @@ export default function DashboardClient() {
             href={`/u/${username}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-full border-2 border-ink bg-white px-3 py-1.5 text-xs font-bold text-ink transition-transform duration-150 hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-flash-yellow"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-full border-2 border-ink bg-white px-3 py-1.5 text-xs font-bold text-ink transition-transform duration-150 hover:-translate-y-0.5 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-flash-yellow"
           >
             <ExternalLink size={14} aria-hidden="true" />
             {t("dashboard.settings.profile.viewProfile")}
@@ -800,7 +800,7 @@ export default function DashboardClient() {
               onTouchStart={() => setAvatarHover(true)}
               aria-label={t("dashboard.settings.profile.avatarChange")}
               title={t("dashboard.settings.profile.avatarChange")}
-              className={`relative flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-flash-coral ${
+              className={`relative flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full focus:outline-hidden focus-visible:ring-2 focus-visible:ring-flash-coral ${
                 avatarPreview !== "" || avatarUrl.trim() !== ""
                   ? `${st.borderW} ${st.border} ${st.card}`
                   : "border-2 border-dashed border-ink"
@@ -899,14 +899,14 @@ export default function DashboardClient() {
                       // cannot be scanned by Tailwind (purge).
                       <div className="flex gap-1">
                         {st.swatch.map((c) => (
-                          <div key={c} className="h-4 flex-1 rounded-sm" style={{ backgroundColor: c }} />
+                          <div key={c} className="h-4 flex-1 rounded-xs" style={{ backgroundColor: c }} />
                         ))}
                       </div>
                     ) : (
                       <>
-                        <div className={`h-2 w-10 rounded-sm ${st.avatar}`} />
-                        <div className="mt-1 h-1 w-full rounded-sm bg-current opacity-50" />
-                        <div className="mt-0.5 h-1 w-12 rounded-sm bg-current opacity-30" />
+                        <div className={`h-2 w-10 rounded-xs ${st.avatar}`} />
+                        <div className="mt-1 h-1 w-full rounded-xs bg-current opacity-50" />
+                        <div className="mt-0.5 h-1 w-12 rounded-xs bg-current opacity-30" />
                       </>
                     )}
                   </div>
@@ -1087,7 +1087,7 @@ export default function DashboardClient() {
             <button
               type="button"
               onClick={openBulk}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-full border-2 border-ink bg-white px-3 py-1.5 text-xs font-bold text-ink transition-transform duration-150 hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-flash-yellow"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-full border-2 border-ink bg-white px-3 py-1.5 text-xs font-bold text-ink transition-transform duration-150 hover:-translate-y-0.5 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-flash-yellow"
             >
               {t("dashboard.links.toolbar.bulkImport")}
             </button>
@@ -1095,7 +1095,7 @@ export default function DashboardClient() {
               type="button"
               onClick={downloadAllQr}
               title={t("dashboard.links.toolbar.qrDownloadTitle")}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-full border-2 border-ink bg-white px-3 py-1.5 text-xs font-bold text-ink transition-transform duration-150 hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-flash-yellow"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-full border-2 border-ink bg-white px-3 py-1.5 text-xs font-bold text-ink transition-transform duration-150 hover:-translate-y-0.5 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-flash-yellow"
             >
               <Download size={14} aria-hidden="true" />
               {t("dashboard.links.toolbar.qrDownload")}
@@ -1109,7 +1109,7 @@ export default function DashboardClient() {
               id="tag-filter"
               value={tagFilter}
               onChange={(e) => setTagFilter(e.target.value)}
-              className={`rounded-full ${st.borderW} ${st.border} ${st.card} px-3 py-1 text-sm focus:border-flash-yellow focus:ring-2 focus:ring-flash-yellow/30 focus:outline-none transition-all duration-150`}
+              className={`rounded-full ${st.borderW} ${st.border} ${st.card} px-3 py-1 text-sm focus:border-flash-yellow focus:ring-2 focus:ring-flash-yellow/30 focus:outline-hidden transition-all duration-150`}
             >
               <option value="">{t("dashboard.links.filter.allOption")}</option>
               {allTags.map((tag) => (
