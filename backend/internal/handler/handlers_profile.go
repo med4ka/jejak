@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"jejak/internal/apierror"
 	"jejak/internal/db"
 	"jejak/internal/middleware"
 )
@@ -23,7 +24,7 @@ import (
 func (h *Handler) HandleGetMyProfile(w http.ResponseWriter, r *http.Request) {
 	creatorID := middleware.CreatorID(r)
 	if creatorID == nil {
-		http.Error(w, "Login required", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Login required")
 		return
 	}
 
@@ -33,13 +34,13 @@ func (h *Handler) HandleGetMyProfile(w http.ResponseWriter, r *http.Request) {
 	// /api/u/{username} still reads from the replica (HandleCreatorLinks).
 	creator, err := h.Store.GetCreatorByIDPrimary(*creatorID)
 	if err != nil {
-		http.Error(w, "Creator not found", http.StatusNotFound)
+		apierror.WriteError(w, http.StatusNotFound, "PROFILE_NOT_FOUND", "Creator not found")
 		return
 	}
 
 	links, err := h.Store.ListLinksByCreatorPrimary(creator.ID)
 	if err != nil {
-		http.Error(w, "Database error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 		return
 	}
 	if links == nil {
@@ -65,7 +66,7 @@ func (h *Handler) HandleGetMyProfile(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleUpdateMyProfile(w http.ResponseWriter, r *http.Request) {
 	creatorID := middleware.CreatorID(r)
 	if creatorID == nil {
-		http.Error(w, "Login required", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Login required")
 		return
 	}
 
@@ -77,7 +78,7 @@ func (h *Handler) HandleUpdateMyProfile(w http.ResponseWriter, r *http.Request) 
 		Theme       string          `json:"theme"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "INVALID_REQUEST_BODY", "Invalid request body")
 		return
 	}
 
@@ -85,15 +86,15 @@ func (h *Handler) HandleUpdateMyProfile(w http.ResponseWriter, r *http.Request) 
 	req.Bio = strings.TrimSpace(req.Bio)
 	req.AvatarURL = strings.TrimSpace(req.AvatarURL)
 	if req.DisplayName == "" || len(req.DisplayName) > 100 {
-		http.Error(w, "display_name required (1-100 chars)", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "PROFILE_DISPLAY_NAME_REQUIRED", "display_name required (1-100 chars)")
 		return
 	}
 	if len(req.Bio) > 500 {
-		http.Error(w, "bio max 500 chars", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "PROFILE_BIO_TOO_LONG", "bio max 500 chars")
 		return
 	}
 	if !validHTTPURL(req.AvatarURL) {
-		http.Error(w, "avatar_url must be empty or http(s) URL", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "PROFILE_AVATAR_URL_INVALID", "avatar_url must be empty or http(s) URL")
 		return
 	}
 	// Themes come from a closed preset set
@@ -104,22 +105,22 @@ func (h *Handler) HandleUpdateMyProfile(w http.ResponseWriter, r *http.Request) 
 	// data (e.g. a manually updated DB column) is coerced at the payload
 	// layer (validTheme), so GET never leaks an unknown value to the frontend.
 	if !validThemePreset(req.Theme) {
-		http.Error(w, "theme must be one of: classic, darkroom, coral, glass, risoPrint, peach, lavender, matcha, sakura, ocean, sunset", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "PROFILE_INVALID_THEME", "theme must be one of: classic, darkroom, coral, glass, risoPrint, peach, lavender, matcha, sakura, ocean, sunset")
 		return
 	}
 	if len(req.Socials) > 10 {
-		http.Error(w, "max 10 social links", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "PROFILE_SOCIALS_LIMIT", "max 10 social links")
 		return
 	}
 	for i := range req.Socials {
 		req.Socials[i].Platform = strings.TrimSpace(req.Socials[i].Platform)
 		req.Socials[i].URL = strings.TrimSpace(req.Socials[i].URL)
 		if req.Socials[i].Platform == "" || len(req.Socials[i].Platform) > 30 {
-			http.Error(w, "each social needs platform (1-30 chars)", http.StatusBadRequest)
+			apierror.WriteError(w, http.StatusBadRequest, "PROFILE_SOCIAL_PLATFORM_REQUIRED", "each social needs platform (1-30 chars)")
 			return
 		}
 		if !validHTTPURL(req.Socials[i].URL) || req.Socials[i].URL == "" {
-			http.Error(w, "each social needs valid http(s) url", http.StatusBadRequest)
+			apierror.WriteError(w, http.StatusBadRequest, "PROFILE_SOCIAL_URL_INVALID", "each social needs valid http(s) url")
 			return
 		}
 	}
@@ -128,13 +129,13 @@ func (h *Handler) HandleUpdateMyProfile(w http.ResponseWriter, r *http.Request) 
 	}
 	socialsJSON, err := json.Marshal(req.Socials)
 	if err != nil {
-		http.Error(w, "Invalid socials", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "PROFILE_SOCIALS_INVALID", "Invalid socials")
 		return
 	}
 
 	if err := h.Store.UpdateCreatorProfile(*creatorID, req.DisplayName, req.Bio, req.AvatarURL, string(socialsJSON), req.Theme); err != nil {
 		h.Logger.Printf("UpdateCreatorProfile failed: %v", err)
-		http.Error(w, "Database error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 		return
 	}
 
@@ -169,7 +170,7 @@ func (h *Handler) HandleUpdateMyProfile(w http.ResponseWriter, r *http.Request) 
 func (h *Handler) HandleUploadAvatar(w http.ResponseWriter, r *http.Request) {
 	creatorID := middleware.CreatorID(r)
 	if creatorID == nil {
-		http.Error(w, "Login required", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Login required")
 		return
 	}
 
@@ -188,16 +189,16 @@ func (h *Handler) HandleUploadAvatar(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(3 << 20); err != nil {
 		var mbe *http.MaxBytesError
 		if errors.As(err, &mbe) {
-			http.Error(w, "File too large (max 2MB)", http.StatusRequestEntityTooLarge)
+			apierror.WriteError(w, http.StatusRequestEntityTooLarge, "AVATAR_TOO_LARGE", "File too large (max 2MB)")
 			return
 		}
-		http.Error(w, "File too large (max 2MB)", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "AVATAR_TOO_LARGE", "File too large (max 2MB)")
 		return
 	}
 
 	file, header, err := r.FormFile("avatar")
 	if err != nil {
-		http.Error(w, "Missing avatar file", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "AVATAR_MISSING", "Missing avatar file")
 		return
 	}
 	defer file.Close()
@@ -207,7 +208,7 @@ func (h *Handler) HandleUploadAvatar(w http.ResponseWriter, r *http.Request) {
 	buf := make([]byte, 12)
 	n, _ := io.ReadFull(file, buf)
 	if n < 4 {
-		http.Error(w, "File too small to be an image", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "AVATAR_TOO_SMALL", "File too small to be an image")
 		return
 	}
 
@@ -220,20 +221,20 @@ func (h *Handler) HandleUploadAvatar(w http.ResponseWriter, r *http.Request) {
 	case n >= 12 && string(buf[0:4]) == "RIFF" && string(buf[8:12]) == "WEBP":
 		ext = "webp"
 	default:
-		http.Error(w, "Only JPG, PNG, and WebP images are accepted", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "AVATAR_BAD_TYPE", "Only JPG, PNG, and WebP images are accepted")
 		return
 	}
 
 	// 2 MB cap: header.Size is set by the multipart parser rather than by
 	// the client, but the actual contents are still checked as a precaution.
 	if header.Size > 2*1024*1024 {
-		http.Error(w, "File too large (max 2MB)", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "AVATAR_TOO_LARGE", "File too large (max 2MB)")
 		return
 	}
 
 	// Rewind: 12 bytes were already consumed by the magic-byte check.
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		http.Error(w, "Internal error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal error")
 		return
 	}
 
@@ -247,7 +248,7 @@ func (h *Handler) HandleUploadAvatar(w http.ResponseWriter, r *http.Request) {
 	// get no write access to the avatar store (G301).
 	if err := os.MkdirAll(filepath.Dir(diskPath), 0750); err != nil {
 		h.Logger.Printf("MkdirAll: %v", err)
-		http.Error(w, "Internal error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal error")
 		return
 	}
 
@@ -256,14 +257,14 @@ func (h *Handler) HandleUploadAvatar(w http.ResponseWriter, r *http.Request) {
 	dst, err := os.Create(diskPath)
 	if err != nil {
 		h.Logger.Printf("Create avatar file: %v", err)
-		http.Error(w, "Internal error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal error")
 		return
 	}
 	defer dst.Close()
 
 	if _, err := io.Copy(dst, file); err != nil {
 		h.Logger.Printf("Copy avatar: %v", err)
-		http.Error(w, "Internal error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal error")
 		return
 	}
 
@@ -273,7 +274,7 @@ func (h *Handler) HandleUploadAvatar(w http.ResponseWriter, r *http.Request) {
 	// socials) back to the primary row (read-your-own-writes).
 	creator, err := h.Store.GetCreatorByIDPrimary(*creatorID)
 	if err != nil {
-		http.Error(w, "Database error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 		return
 	}
 	bio := ""
@@ -287,7 +288,7 @@ func (h *Handler) HandleUploadAvatar(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.Store.UpdateCreatorProfile(*creatorID, creator.DisplayName, bio, avatarPath, socials, creator.Theme); err != nil {
 		h.Logger.Printf("UpdateCreatorProfile avatar: %v", err)
-		http.Error(w, "Database error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 		return
 	}
 

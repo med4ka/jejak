@@ -192,6 +192,70 @@ func TestPasswordRedirectGate(t *testing.T) {
 	}
 }
 
+// TestPasswordFormLocales: the gate page renders from Accept-Language
+// (internal/i18n); no header = Indonesian, en/de = translated. The error
+// kind (?e=1) is translated too.
+func TestPasswordFormLocales(t *testing.T) {
+	setup := func() (*Handler, *fakeStore) {
+		s := &fakeStore{}
+		s.link = dbLink("pwloc", "https://example.com/dest")
+		s.link.PasswordHash = bcryptHashOf(t, "test123")
+		return &Handler{Store: s}, s
+	}
+	cases := []struct {
+		name     string
+		accept   string
+		query    string
+		contains []string
+		absent   []string
+	}{
+		{"default Indonesian", "", "", []string{"Link ini dilindungi password", "Buka link"}, nil},
+		{"English", "en-US,en;q=0.9", "", []string{"This link is password-protected", "Open link"}, []string{"dilindungi"}},
+		{"German", "de-DE,de;q=0.9", "", []string{"passwortgeschützt", "Link öffnen"}, []string{"dilindungi"}},
+		{"English wrong-password", "en", "?e=1", []string{"Wrong password. Try again."}, []string{"Password salah"}},
+		{"German rate-limit text key exists", "de", "", []string{"Gib das Passwort ein"}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _ := setup()
+			req := httptest.NewRequest(http.MethodGet, "/r/pwloc"+tc.query, nil)
+			if tc.accept != "" {
+				req.Header.Set("Accept-Language", tc.accept)
+			}
+			rr := httptest.NewRecorder()
+			h.HandleRedirect("pwloc", rr, req)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rr.Code)
+			}
+			body := rr.Body.String()
+			for _, want := range tc.contains {
+				if !strings.Contains(body, want) {
+					t.Errorf("body misses %q (Accept-Language %q)", want, tc.accept)
+				}
+			}
+			for _, notWant := range tc.absent {
+				if strings.Contains(body, notWant) {
+					t.Errorf("body leaks untranslated %q (Accept-Language %q)", notWant, tc.accept)
+				}
+			}
+			if !strings.Contains(body, `lang="`+tcLang(tc.accept)+`"`) {
+				t.Errorf("html lang attribute wrong for Accept-Language %q", tc.accept)
+			}
+		})
+	}
+}
+
+func tcLang(accept string) string {
+	switch {
+	case strings.HasPrefix(accept, "en"):
+		return "en"
+	case strings.HasPrefix(accept, "de"):
+		return "de"
+	default:
+		return "id"
+	}
+}
+
 // TestHealthGateRedirect: broken destination answers IN PLACE (fallback
 // interstitial or 503) without logging a click; healthy redirects normally.
 func TestHealthGateRedirect(t *testing.T) {

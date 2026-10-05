@@ -1,0 +1,17 @@
+{
+  "link": {
+    "password": {
+      "prompt": {
+        "pageTitle": "Link dilindungi password",
+        "title": "Link ini dilindungi password",
+        "subtitle": "Masukkan password untuk melanjutkan ke tujuan link.",
+        "input_label": "Password",
+        "button": "Buka link"
+      },
+      "error": {
+        "wrong": "Password salah. Coba lagi.",
+        "rate_limited": "Terlalu banyak percobaan. Coba lagi dalam satu menit."
+      }
+    }
+  }
+}

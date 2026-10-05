@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import SubmitButton from "./SubmitButton";
 import { useTranslation } from "../../lib/I18nProvider";
+import { translateError } from "../../lib/errors";
 
 // Auth dialog (login/register): opened from the navbar rather than as a
 // separate page. Desktop: centered, 420px max-width. Mobile: bottom sheet
@@ -51,7 +52,9 @@ export default function AuthModal({ mode, onClose, onSuccess, st }) {
         throw new Error(text || t("errors.auth.requestFailed"));
       }
       if (!res.ok) {
-        throw new Error(data.error || text || t("errors.auth.requestFailed"));
+        // Go answers {code,message} (backend/internal/apierror): translate
+        // by code, fall back to the server message.
+        throw new Error(translateError(data, t, text || t("errors.auth.requestFailed")));
       }
       localStorage.setItem("jejak_username", data.username);
       onSuccess(data.username);

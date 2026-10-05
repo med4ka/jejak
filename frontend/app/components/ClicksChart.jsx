@@ -12,6 +12,7 @@ import {
 } from "recharts";
 import { themeStyles } from "../../lib/themes";
 import { useTranslation } from "../../lib/I18nProvider";
+import { translateError } from "../../lib/errors";
 import ChartTooltip from "./ChartTooltip";
 
 // "2026-09-08" → "8 Sep" (short form: sufficient for a dense X axis).
@@ -91,7 +92,7 @@ export default function ClicksChart({ theme = "classic", st, range = "30d" }) {
           throw new Error(text || t("errors.analytics.chartLoad"));
         }
         if (!res.ok) {
-          throw new Error(parsed.error || t("errors.analytics.chartLoad"));
+          throw new Error(translateError(parsed, t, text || t("errors.analytics.chartLoad")));
         }
         if (alive) {
           setData(Array.isArray(parsed.days) ? parsed.days : []);

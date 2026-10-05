@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"jejak/internal/apierror"
 	"jejak/internal/auth"
 	"jejak/internal/db"
 	"jejak/internal/middleware"
@@ -47,12 +48,12 @@ func (h *Handler) decodeAccountBody(w http.ResponseWriter, r *http.Request, dst 
 // to the old address was rejected as overkill without a mailer in the MVP.
 func (h *Handler) HandleUpdateEmail(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apierror.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 		return
 	}
 	creatorID := h.accountCreatorID(r)
 	if creatorID == nil {
-		http.Error(w, "Login required", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Login required")
 		return
 	}
 
@@ -61,26 +62,26 @@ func (h *Handler) HandleUpdateEmail(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 	if err := h.decodeAccountBody(w, r, &req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "INVALID_REQUEST_BODY", "Invalid request body")
 		return
 	}
 	req.Email = strings.TrimSpace(req.Email)
 	if !validEmail.MatchString(req.Email) || len(req.Email) > 255 {
-		http.Error(w, "Email tidak valid", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "ACCOUNT_INVALID_EMAIL", "Email tidak valid")
 		return
 	}
 	if req.Password == "" {
-		http.Error(w, "Password saat ini wajib diisi", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "ACCOUNT_CURRENT_PASSWORD_REQUIRED", "Password saat ini wajib diisi")
 		return
 	}
 
 	creator, err := h.Store.GetCreatorAuth(*creatorID)
 	if err != nil {
-		http.Error(w, "Account not found", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_ACCOUNT_NOT_FOUND", "Account not found")
 		return
 	}
 	if !auth.CheckPassword(creator.PasswordHash, req.Password) {
-		http.Error(w, "Password salah", http.StatusForbidden)
+		apierror.WriteError(w, http.StatusForbidden, "AUTH_WRONG_PASSWORD", "Password salah")
 		return
 	}
 
@@ -89,11 +90,11 @@ func (h *Handler) HandleUpdateEmail(w http.ResponseWriter, r *http.Request) {
 	if creator.Email != req.Email {
 		if err := h.Store.UpdateCreatorEmail(*creatorID, req.Email); err != nil {
 			if errors.Is(err, db.ErrEmailTaken) {
-				http.Error(w, "Email sudah dipakai akun lain", http.StatusConflict)
+				apierror.WriteError(w, http.StatusConflict, "ACCOUNT_EMAIL_TAKEN", "Email sudah dipakai akun lain")
 				return
 			}
 			h.Logger.Printf("UpdateCreatorEmail failed: %v", err)
-			http.Error(w, "Database error", http.StatusInternalServerError)
+			apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 			return
 		}
 	}
@@ -109,12 +110,12 @@ func (h *Handler) HandleUpdateEmail(w http.ResponseWriter, r *http.Request) {
 // dashboard.
 func (h *Handler) HandleUpdatePassword(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apierror.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 		return
 	}
 	creatorID := h.accountCreatorID(r)
 	if creatorID == nil {
-		http.Error(w, "Login required", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Login required")
 		return
 	}
 
@@ -123,37 +124,37 @@ func (h *Handler) HandleUpdatePassword(w http.ResponseWriter, r *http.Request) {
 		NewPassword     string `json:"new_password"`
 	}
 	if err := h.decodeAccountBody(w, r, &req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "INVALID_REQUEST_BODY", "Invalid request body")
 		return
 	}
 	if req.CurrentPassword == "" || req.NewPassword == "" {
-		http.Error(w, "Password lama dan baru wajib diisi", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "ACCOUNT_PASSWORD_REQUIRED", "Password lama dan baru wajib diisi")
 		return
 	}
 	if len(req.NewPassword) < 8 {
-		http.Error(w, "Password baru minimal 8 karakter", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "ACCOUNT_PASSWORD_TOO_SHORT", "Password baru minimal 8 karakter")
 		return
 	}
 
 	creator, err := h.Store.GetCreatorAuth(*creatorID)
 	if err != nil {
-		http.Error(w, "Account not found", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_ACCOUNT_NOT_FOUND", "Account not found")
 		return
 	}
 	if !auth.CheckPassword(creator.PasswordHash, req.CurrentPassword) {
-		http.Error(w, "Password salah", http.StatusForbidden)
+		apierror.WriteError(w, http.StatusForbidden, "AUTH_WRONG_PASSWORD", "Password salah")
 		return
 	}
 
 	hash, err := auth.HashPassword(req.NewPassword)
 	if err != nil {
 		h.Logger.Printf("HashPassword failed: %v", err)
-		http.Error(w, "Failed to secure password", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "AUTH_HASH_ERROR", "Failed to secure password")
 		return
 	}
 	if err := h.Store.UpdateCreatorPassword(*creatorID, hash); err != nil {
 		h.Logger.Printf("UpdateCreatorPassword failed: %v", err)
-		http.Error(w, "Database error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 		return
 	}
 
@@ -180,18 +181,18 @@ func (h *Handler) HandleUpdatePassword(w http.ResponseWriter, r *http.Request) {
 // in.
 func (h *Handler) HandleLogoutAll(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apierror.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 		return
 	}
 	creatorID := h.accountCreatorID(r)
 	if creatorID == nil {
-		http.Error(w, "Login required", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Login required")
 		return
 	}
 	if h.Auth != nil {
 		if _, err := h.Auth.DeleteAllForUser(*creatorID, ""); err != nil {
 			h.Logger.Printf("DeleteAllForUser failed: %v", err)
-			http.Error(w, "Failed to revoke sessions", http.StatusInternalServerError)
+			apierror.WriteError(w, http.StatusInternalServerError, "ACCOUNT_REVOKE_FAILED", "Failed to revoke sessions")
 			return
 		}
 	}
@@ -208,12 +209,12 @@ func (h *Handler) HandleLogoutAll(w http.ResponseWriter, r *http.Request) {
 // → creators), then every session is revoked and the cookie is cleared.
 func (h *Handler) HandleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apierror.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 		return
 	}
 	creatorID := h.accountCreatorID(r)
 	if creatorID == nil {
-		http.Error(w, "Login required", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Login required")
 		return
 	}
 
@@ -222,31 +223,31 @@ func (h *Handler) HandleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 		Password     string `json:"password"`
 	}
 	if err := h.decodeAccountBody(w, r, &req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "INVALID_REQUEST_BODY", "Invalid request body")
 		return
 	}
 	if req.Confirmation != "HAPUS" {
-		http.Error(w, `Konfirmasi harus tepat "HAPUS"`, http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "ACCOUNT_CONFIRM_MISMATCH", `Konfirmasi harus tepat "HAPUS"`)
 		return
 	}
 	if req.Password == "" {
-		http.Error(w, "Password wajib diisi", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "ACCOUNT_PASSWORD_REQUIRED", "Password wajib diisi")
 		return
 	}
 
 	creator, err := h.Store.GetCreatorAuth(*creatorID)
 	if err != nil {
-		http.Error(w, "Account not found", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_ACCOUNT_NOT_FOUND", "Account not found")
 		return
 	}
 	if !auth.CheckPassword(creator.PasswordHash, req.Password) {
-		http.Error(w, "Password salah", http.StatusForbidden)
+		apierror.WriteError(w, http.StatusForbidden, "AUTH_WRONG_PASSWORD", "Password salah")
 		return
 	}
 
 	if err := h.Store.DeleteCreatorAccount(*creatorID); err != nil {
 		h.Logger.Printf("DeleteCreatorAccount failed (id=%d): %v", *creatorID, err)
-		http.Error(w, "Database error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 		return
 	}
 	if h.Auth != nil {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"jejak/internal/apierror"
 	"jejak/internal/auth"
 	"jejak/internal/ratelimit"
 )
@@ -19,11 +20,11 @@ import (
 // creator account.
 func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apierror.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 		return
 	}
 	if h.Auth == nil {
-		http.Error(w, "Auth not configured", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "AUTH_NOT_CONFIGURED", "Auth not configured")
 		return
 	}
 
@@ -37,7 +38,7 @@ func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	if h.RegisterLimiter != nil {
 		if !h.RegisterLimiter.Allow(rlKey) {
 			w.Header().Set("Retry-After", "60")
-			http.Error(w, "Too many registration attempts, try again later", http.StatusTooManyRequests)
+			apierror.WriteError(w, http.StatusTooManyRequests, "REGISTER_RATE_LIMITED", "Too many registration attempts, try again later")
 			return
 		}
 		h.RegisterLimiter.Record(rlKey)
@@ -50,21 +51,21 @@ func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		Password    string `json:"password"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "INVALID_REQUEST_BODY", "Invalid request body")
 		return
 	}
 	if !auth.ValidUsername(req.Username) {
-		http.Error(w, "Invalid username (3-30 chars, letters/digits/underscore)", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "AUTH_INVALID_USERNAME", "Invalid username (3-30 chars, letters/digits/underscore)")
 		return
 	}
 	if req.DisplayName == "" || len(req.Password) < 8 {
-		http.Error(w, "display_name required, password min 8 chars", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "AUTH_INVALID_REGISTER", "display_name required, password min 8 chars")
 		return
 	}
 
 	hash, err := auth.HashPassword(req.Password)
 	if err != nil {
-		http.Error(w, "Failed to secure password", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "AUTH_HASH_ERROR", "Failed to secure password")
 		return
 	}
 	id, err := h.Store.CreateCreator(req.Username, req.DisplayName, req.Bio, hash)
@@ -72,13 +73,13 @@ func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		// UNIQUE violation -> username taken. String match is driver-specific
 		// but pgx/pq both surface "duplicate key" for 23505; keep generic 409.
 		h.Logger.Printf("CreateCreator failed: %v", err)
-		http.Error(w, "Username already taken", http.StatusConflict)
+		apierror.WriteError(w, http.StatusConflict, "AUTH_USERNAME_TAKEN", "Username already taken")
 		return
 	}
 
 	token, err := h.Auth.Create(id)
 	if err != nil {
-		http.Error(w, "Failed to create session", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "AUTH_SESSION_ERROR", "Failed to create session")
 		return
 	}
 	auth.SetCookie(w, token)
@@ -92,11 +93,11 @@ func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 // Unknown user and wrong password return the SAME 401 (no user enumeration).
 func (h *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apierror.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 		return
 	}
 	if h.Auth == nil {
-		http.Error(w, "Auth not configured", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "AUTH_NOT_CONFIGURED", "Auth not configured")
 		return
 	}
 
@@ -105,7 +106,7 @@ func (h *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "INVALID_REQUEST_BODY", "Invalid request body")
 		return
 	}
 
@@ -115,7 +116,7 @@ func (h *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	rlKey := ratelimit.Key(ratelimit.ClientIP(r.RemoteAddr, r.Header.Get("X-Forwarded-For")), req.Username)
 	if h.LoginLimiter != nil && !h.LoginLimiter.Allow(rlKey) {
 		w.Header().Set("Retry-After", "60")
-		http.Error(w, "Too many login attempts, try again later", http.StatusTooManyRequests)
+		apierror.WriteError(w, http.StatusTooManyRequests, "LOGIN_RATE_LIMITED", "Too many login attempts, try again later")
 		return
 	}
 
@@ -124,7 +125,7 @@ func (h *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		if h.LoginLimiter != nil {
 			h.LoginLimiter.Record(rlKey)
 		}
-		http.Error(w, "Invalid username or password", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_INVALID_CREDENTIALS", "Invalid username or password")
 		return
 	}
 	if h.LoginLimiter != nil {
@@ -133,7 +134,7 @@ func (h *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 
 	token, err := h.Auth.Create(creator.ID)
 	if err != nil {
-		http.Error(w, "Failed to create session", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "AUTH_SESSION_ERROR", "Failed to create session")
 		return
 	}
 	auth.SetCookie(w, token)
@@ -148,11 +149,11 @@ func (h *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 // sending a dead token: harmless but noisy in the logs.
 func (h *Handler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apierror.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 		return
 	}
 	if h.Auth == nil {
-		http.Error(w, "Auth not configured", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "AUTH_NOT_CONFIGURED", "Auth not configured")
 		return
 	}
 

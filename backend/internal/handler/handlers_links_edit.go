@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"jejak/internal/apierror"
 	"jejak/internal/auth"
 	"jejak/internal/middleware"
 )
@@ -35,7 +36,7 @@ type optionalTime struct {
 func (h *Handler) HandleClaimLinks(w http.ResponseWriter, r *http.Request) {
 	creatorID := middleware.CreatorID(r)
 	if creatorID == nil {
-		http.Error(w, "Login required", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Login required")
 		return
 	}
 
@@ -43,18 +44,18 @@ func (h *Handler) HandleClaimLinks(w http.ResponseWriter, r *http.Request) {
 		ShortCodes []string `json:"short_codes"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "INVALID_REQUEST_BODY", "Invalid request body")
 		return
 	}
 	if len(req.ShortCodes) > 50 {
-		http.Error(w, "max 50 codes per claim", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "LINK_CLAIM_LIMIT", "max 50 codes per claim")
 		return
 	}
 	codes := make([]string, 0, len(req.ShortCodes))
 	for _, c := range req.ShortCodes {
 		c = strings.TrimSpace(c)
 		if c == "" || len(c) > 30 {
-			http.Error(w, "Invalid short code in list", http.StatusBadRequest)
+			apierror.WriteError(w, http.StatusBadRequest, "LINK_INVALID_CODE", "Invalid short code in list")
 			return
 		}
 		codes = append(codes, c)
@@ -63,7 +64,7 @@ func (h *Handler) HandleClaimLinks(w http.ResponseWriter, r *http.Request) {
 	claimed, err := h.Store.ClaimLinks(*creatorID, codes)
 	if err != nil {
 		h.Logger.Printf("ClaimLinks failed: %v", err)
-		http.Error(w, "Database error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 		return
 	}
 
@@ -102,7 +103,7 @@ func normalizeTags(raw []string) ([]string, bool) {
 func (h *Handler) HandleReorderLinks(w http.ResponseWriter, r *http.Request) {
 	creatorID := middleware.CreatorID(r)
 	if creatorID == nil {
-		http.Error(w, "Login required", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Login required")
 		return
 	}
 
@@ -110,25 +111,25 @@ func (h *Handler) HandleReorderLinks(w http.ResponseWriter, r *http.Request) {
 		Order []string `json:"order"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "INVALID_REQUEST_BODY", "Invalid request body")
 		return
 	}
 	if req.Order == nil {
-		http.Error(w, "order is required", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "LINK_ORDER_REQUIRED", "order is required")
 		return
 	}
 	if len(req.Order) > 200 {
-		http.Error(w, "max 200 links per reorder", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "LINK_REORDER_LIMIT", "max 200 links per reorder")
 		return
 	}
 
 	if err := h.Store.ReorderLinks(*creatorID, req.Order); err != nil {
 		if err == sql.ErrNoRows {
-			http.Error(w, "Unknown short code or not yours", http.StatusNotFound)
+			apierror.WriteError(w, http.StatusNotFound, "LINK_NOT_FOUND", "Unknown short code or not yours")
 			return
 		}
 		h.Logger.Printf("ReorderLinks failed: %v", err)
-		http.Error(w, "Database error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 		return
 	}
 
@@ -158,12 +159,12 @@ func (h *Handler) HandleReorderLinks(w http.ResponseWriter, r *http.Request) {
 // (same as doShorten: the same UTC rule).
 func (h *Handler) HandleUpdateLink(shortCode string, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apierror.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 		return
 	}
 	creatorID := middleware.CreatorID(r)
 	if creatorID == nil {
-		http.Error(w, "Login required", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Login required")
 		return
 	}
 
@@ -187,11 +188,11 @@ func (h *Handler) HandleUpdateLink(shortCode string, w http.ResponseWriter, r *h
 		FallbackURL *string `json:"fallback_url"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "INVALID_REQUEST_BODY", "Invalid request body")
 		return
 	}
 	if req.DeviceRules == nil && req.Tags == nil && req.IsFeatured == nil && req.IsActive == nil && len(req.ExpiresAt) == 0 && req.Password == nil && req.FallbackURL == nil {
-		http.Error(w, "Nothing to update", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "LINK_NOTHING_TO_UPDATE", "Nothing to update")
 		return
 	}
 
@@ -203,24 +204,24 @@ func (h *Handler) HandleUpdateLink(shortCode string, w http.ResponseWriter, r *h
 		hash := ""
 		if pw != "" {
 			if len(pw) < 4 || len(pw) > 72 {
-				writeFieldError(w, http.StatusBadRequest, "password", "password harus 4-72 karakter")
+				apierror.WriteFieldError(w, http.StatusBadRequest, "password", "LINK_PASSWORD_INVALID", "password harus 4-72 karakter")
 				return
 			}
 			hashed, err := auth.HashPassword(pw)
 			if err != nil {
 				h.Logger.Printf("HashPassword failed: %v", err)
-				http.Error(w, "Failed to hash password", http.StatusInternalServerError)
+				apierror.WriteError(w, http.StatusInternalServerError, "LINK_PASSWORD_HASH_ERROR", "Failed to hash password")
 				return
 			}
 			hash = hashed
 		}
 		if err := h.Store.SetLinkPassword(*creatorID, shortCode, hash); err != nil {
 			if err == sql.ErrNoRows {
-				http.Error(w, "Unknown short code or not yours", http.StatusNotFound)
+				apierror.WriteError(w, http.StatusNotFound, "LINK_NOT_FOUND", "Unknown short code or not yours")
 				return
 			}
 			h.Logger.Printf("SetLinkPassword failed for %q: %v", shortCode, err)
-			http.Error(w, "Database error", http.StatusInternalServerError)
+			apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 			return
 		}
 	}
@@ -230,16 +231,16 @@ func (h *Handler) HandleUpdateLink(shortCode string, w http.ResponseWriter, r *h
 	if req.FallbackURL != nil {
 		fb := *req.FallbackURL
 		if fb != "" && !validRemoteURL(fb) {
-			writeFieldError(w, http.StatusBadRequest, "fallback_url", "fallback_url harus URL http(s) yang valid")
+			apierror.WriteFieldError(w, http.StatusBadRequest, "fallback_url", "LINK_FALLBACK_URL_INVALID", "fallback_url harus URL http(s) yang valid")
 			return
 		}
 		if err := h.Store.SetLinkFallback(*creatorID, shortCode, fb); err != nil {
 			if err == sql.ErrNoRows {
-				http.Error(w, "Unknown short code or not yours", http.StatusNotFound)
+				apierror.WriteError(w, http.StatusNotFound, "LINK_NOT_FOUND", "Unknown short code or not yours")
 				return
 			}
 			h.Logger.Printf("SetLinkFallback failed for %q: %v", shortCode, err)
-			http.Error(w, "Database error", http.StatusInternalServerError)
+			apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 			return
 		}
 	}
@@ -253,17 +254,17 @@ func (h *Handler) HandleUpdateLink(shortCode string, w http.ResponseWriter, r *h
 		} else {
 			var s string
 			if err := json.Unmarshal(req.ExpiresAt, &s); err != nil {
-				writeFieldError(w, http.StatusBadRequest, "expires_at", "expires_at must be RFC3339 UTC or null")
+				apierror.WriteFieldError(w, http.StatusBadRequest, "expires_at", "LINK_EXPIRES_AT_INVALID", "expires_at must be RFC3339 UTC or null")
 				return
 			}
 			t, err := time.Parse(time.RFC3339, s)
 			if err != nil {
-				writeFieldError(w, http.StatusBadRequest, "expires_at", "expires_at must be RFC3339 UTC (contoh: 2026-10-01T09:00:00Z)")
+				apierror.WriteFieldError(w, http.StatusBadRequest, "expires_at", "LINK_EXPIRES_AT_INVALID", "expires_at must be RFC3339 UTC (contoh: 2026-10-01T09:00:00Z)")
 				return
 			}
 			u := t.UTC()
 			if !u.After(time.Now().UTC().Add(time.Hour)) {
-				writeFieldError(w, http.StatusUnprocessableEntity, "expires_at", "expires_at must be more than 1 hour in the future")
+				apierror.WriteFieldError(w, http.StatusUnprocessableEntity, "expires_at", "LINK_EXPIRES_AT_TOO_SOON", "expires_at must be more than 1 hour in the future")
 				return
 			}
 			expires.Set = true
@@ -274,7 +275,7 @@ func (h *Handler) HandleUpdateLink(shortCode string, w http.ResponseWriter, r *h
 	if req.DeviceRules != nil {
 		for key, ruleURL := range *req.DeviceRules {
 			if !validHTTPURL(ruleURL) {
-				http.Error(w, "Invalid URL for "+key, http.StatusBadRequest)
+				apierror.WriteError(w, http.StatusBadRequest, "LINK_INVALID_DEVICE_URL", "Invalid URL for "+key)
 				return
 			}
 		}
@@ -285,13 +286,13 @@ func (h *Handler) HandleUpdateLink(shortCode string, w http.ResponseWriter, r *h
 		var ok bool
 		tags, ok = normalizeTags(*req.Tags)
 		if !ok {
-			http.Error(w, "Invalid tags (max 5 tags, 1-20 chars each)", http.StatusBadRequest)
+			apierror.WriteError(w, http.StatusBadRequest, "LINK_INVALID_TAGS", "Invalid tags (max 5 tags, 1-20 chars each)")
 			return
 		}
 	}
 	tagsJSON, err := json.Marshal(tags)
 	if err != nil {
-		http.Error(w, "Invalid tags", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "LINK_INVALID_TAGS", "Invalid tags")
 		return
 	}
 
@@ -301,7 +302,7 @@ func (h *Handler) HandleUpdateLink(shortCode string, w http.ResponseWriter, r *h
 	}
 	rulesJSON, err := json.Marshal(rules)
 	if err != nil {
-		http.Error(w, "Invalid device_rules", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "LINK_INVALID_DEVICE_RULES", "Invalid device_rules")
 		return
 	}
 
@@ -310,11 +311,11 @@ func (h *Handler) HandleUpdateLink(shortCode string, w http.ResponseWriter, r *h
 	if req.DeviceRules != nil || req.Tags != nil {
 		if err := h.Store.UpdateLink(*creatorID, shortCode, string(rulesJSON), string(tagsJSON)); err != nil {
 			if err == sql.ErrNoRows {
-				http.Error(w, "Unknown short code or not yours", http.StatusNotFound)
+				apierror.WriteError(w, http.StatusNotFound, "LINK_NOT_FOUND", "Unknown short code or not yours")
 				return
 			}
 			h.Logger.Printf("UpdateLink failed for %q: %v", shortCode, err)
-			http.Error(w, "Database error", http.StatusInternalServerError)
+			apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 			return
 		}
 	}
@@ -322,11 +323,11 @@ func (h *Handler) HandleUpdateLink(shortCode string, w http.ResponseWriter, r *h
 	if req.IsFeatured != nil {
 		if err := h.Store.SetFeaturedLink(*creatorID, shortCode, *req.IsFeatured); err != nil {
 			if err == sql.ErrNoRows {
-				http.Error(w, "Unknown short code or not yours", http.StatusNotFound)
+				apierror.WriteError(w, http.StatusNotFound, "LINK_NOT_FOUND", "Unknown short code or not yours")
 				return
 			}
 			h.Logger.Printf("SetFeaturedLink failed for %q: %v", shortCode, err)
-			http.Error(w, "Database error", http.StatusInternalServerError)
+			apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 			return
 		}
 	}
@@ -338,11 +339,11 @@ func (h *Handler) HandleUpdateLink(shortCode string, w http.ResponseWriter, r *h
 	if req.IsActive != nil {
 		if err := h.Store.SetLinkActive(*creatorID, shortCode, *req.IsActive); err != nil {
 			if err == sql.ErrNoRows {
-				http.Error(w, "Unknown short code or not yours", http.StatusNotFound)
+				apierror.WriteError(w, http.StatusNotFound, "LINK_NOT_FOUND", "Unknown short code or not yours")
 				return
 			}
 			h.Logger.Printf("SetLinkActive failed for %q: %v", shortCode, err)
-			http.Error(w, "Database error", http.StatusInternalServerError)
+			apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 			return
 		}
 	}
@@ -353,11 +354,11 @@ func (h *Handler) HandleUpdateLink(shortCode string, w http.ResponseWriter, r *h
 	if expires.Set {
 		if err := h.Store.SetLinkExpiry(*creatorID, shortCode, expires.T); err != nil {
 			if err == sql.ErrNoRows {
-				http.Error(w, "Unknown short code or not yours", http.StatusNotFound)
+				apierror.WriteError(w, http.StatusNotFound, "LINK_NOT_FOUND", "Unknown short code or not yours")
 				return
 			}
 			h.Logger.Printf("SetLinkExpiry failed for %q: %v", shortCode, err)
-			http.Error(w, "Database error", http.StatusInternalServerError)
+			apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 			return
 		}
 	}

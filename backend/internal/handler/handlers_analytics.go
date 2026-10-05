@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"jejak/internal/apierror"
 	"jejak/internal/db"
 	"jejak/internal/middleware"
 )
@@ -35,14 +36,14 @@ const analyticsCacheTTL = 300
 func (h *Handler) HandleClicksByDay(w http.ResponseWriter, r *http.Request) {
 	creatorID := middleware.CreatorID(r)
 	if creatorID == nil {
-		http.Error(w, "Login required", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Login required")
 		return
 	}
 
 	days, err := h.Store.ClicksByDay(*creatorID)
 	if err != nil {
 		h.Logger.Printf("ClicksByDay failed: %v", err)
-		http.Error(w, "Database error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 		return
 	}
 
@@ -66,7 +67,7 @@ func (h *Handler) HandleAnalyticsSummary(w http.ResponseWriter, r *http.Request)
 	if creatorID == nil {
 		id, err := h.creatorFromAPIKey(r)
 		if err != nil {
-			http.Error(w, "Login required", http.StatusUnauthorized)
+			apierror.WriteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Login required")
 			return
 		}
 		creatorID = id
@@ -75,7 +76,7 @@ func (h *Handler) HandleAnalyticsSummary(w http.ResponseWriter, r *http.Request)
 	summary, err := h.Store.AnalyticsSummary(*creatorID)
 	if err != nil {
 		h.Logger.Printf("AnalyticsSummary failed: %v", err)
-		http.Error(w, "Database error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 		return
 	}
 
@@ -143,18 +144,18 @@ func normalizedRange(q string) string {
 func (h *Handler) HandleBreakdown(w http.ResponseWriter, r *http.Request) {
 	creatorID := middleware.CreatorID(r)
 	if creatorID == nil {
-		http.Error(w, "Login required", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Login required")
 		return
 	}
 	kind := r.URL.Query().Get("kind")
 	if kind != "device" && kind != "referrer" {
-		http.Error(w, "kind harus device atau referrer", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "ANALYTICS_INVALID_KIND", "kind harus device atau referrer")
 		return
 	}
 	rawRange := r.URL.Query().Get("range")
 	rp, ok := parseRange(rawRange)
 	if !ok {
-		http.Error(w, "range harus 7d, 30d, atau 90d", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "ANALYTICS_INVALID_RANGE", "range harus 7d, 30d, atau 90d")
 		return
 	}
 	rangeName := normalizedRange(rawRange)
@@ -176,7 +177,7 @@ func (h *Handler) HandleBreakdown(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		h.Logger.Printf("Breakdown(%s) failed: %v", kind, err)
-		http.Error(w, "Database error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 		return
 	}
 	h.storeJSON(key, items)
@@ -212,13 +213,13 @@ func (h *Handler) writeBreakdown(w http.ResponseWriter, kind, rangeName string, 
 func (h *Handler) HandleTimeseries(w http.ResponseWriter, r *http.Request) {
 	creatorID := middleware.CreatorID(r)
 	if creatorID == nil {
-		http.Error(w, "Login required", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Login required")
 		return
 	}
 	rawRange := r.URL.Query().Get("range")
 	rp, ok := parseRange(rawRange)
 	if !ok {
-		http.Error(w, "range harus 7d, 30d, atau 90d", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "ANALYTICS_INVALID_RANGE", "range harus 7d, 30d, atau 90d")
 		return
 	}
 	rangeName := normalizedRange(rawRange)
@@ -235,7 +236,7 @@ func (h *Handler) HandleTimeseries(w http.ResponseWriter, r *http.Request) {
 	counts, err := h.Store.ClicksDaily(*creatorID, rp.From, rp.To)
 	if err != nil {
 		h.Logger.Printf("ClicksDaily failed: %v", err)
-		http.Error(w, "Database error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 		return
 	}
 	days := db.FillDays(counts, rp.From, rp.To)
@@ -278,7 +279,7 @@ func exportFilename(mode, rangeName string) string {
 func (h *Handler) HandleExportCSV(w http.ResponseWriter, r *http.Request) {
 	creatorID := middleware.CreatorID(r)
 	if creatorID == nil {
-		http.Error(w, "Login required", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Login required")
 		return
 	}
 	mode := r.URL.Query().Get("mode")
@@ -286,13 +287,13 @@ func (h *Handler) HandleExportCSV(w http.ResponseWriter, r *http.Request) {
 		mode = "daily"
 	}
 	if mode != "daily" && mode != "links" && mode != "clicks" {
-		http.Error(w, "mode harus daily, links, atau clicks", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "ANALYTICS_INVALID_MODE", "mode harus daily, links, atau clicks")
 		return
 	}
 	rawRange := r.URL.Query().Get("range")
 	rp, ok := parseRange(rawRange)
 	if !ok {
-		http.Error(w, "range harus 7d, 30d, atau 90d", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "ANALYTICS_INVALID_RANGE", "range harus 7d, 30d, atau 90d")
 		return
 	}
 	rangeName := normalizedRange(rawRange)
@@ -312,7 +313,7 @@ func (h *Handler) HandleExportCSV(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		h.Logger.Printf("Export CSV (%s) failed: %v", mode, err)
-		http.Error(w, "Database error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 		return
 	}
 	if truncated {

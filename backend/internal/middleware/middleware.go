@@ -9,6 +9,7 @@ import (
 	"context"
 	"net/http"
 
+	"jejak/internal/apierror"
 	"jejak/internal/auth"
 	"jejak/internal/ratelimit"
 )
@@ -63,7 +64,7 @@ func authAdapter(st auth.Store, required bool) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			id := authFromRequest(st, w, r)
 			if required && id == nil {
-				http.Error(w, "Login required", http.StatusUnauthorized)
+				apierror.WriteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Login required")
 				return
 			}
 			if id != nil {
@@ -101,7 +102,7 @@ func RateLimit(l *ratelimit.Limiter, key func(*http.Request) string) func(http.H
 			bucket := key(r)
 			if !l.Allow(bucket) {
 				w.Header().Set("Retry-After", "60")
-				http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+				apierror.WriteError(w, http.StatusTooManyRequests, "RATE_LIMIT_EXCEEDED", "Rate limit exceeded")
 				return
 			}
 			l.Record(bucket)

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Download } from "lucide-react";
 import { useTranslation } from "../../lib/I18nProvider";
+import { translateError } from "../../lib/errors";
 import ClicksChart from "../components/ClicksChart";
 
 // The offered ranges are exactly the ranges the BACKEND allows (parseRange
@@ -120,7 +121,7 @@ export default function AnalyticsTab({ st, range, onRange }) {
             throw new Error(text || t("errors.analytics.breakdownLoad"));
           }
           if (!res.ok) {
-            throw new Error(parsed.error || t("errors.analytics.breakdownLoad"));
+            throw new Error(translateError(parsed, t, text || t("errors.analytics.breakdownLoad")));
           }
           if (alive) {
             setter(Array.isArray(parsed.items) ? parsed.items : []);

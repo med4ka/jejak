@@ -1,9 +1,9 @@
 package middleware
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"jejak/internal/auth"
@@ -41,8 +41,15 @@ func TestRequireAuthAnonymous401(t *testing.T) {
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rr.Code)
 	}
-	if strings.TrimSpace(rr.Body.String()) != "Login required" {
-		t.Errorf("body = %q, want \"Login required\"", rr.Body.String())
+	var body struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body is not a JSON error envelope: %v (%q)", err, rr.Body.String())
+	}
+	if body.Code != "AUTH_REQUIRED" || body.Message == "" {
+		t.Errorf("body = %+v, want code AUTH_REQUIRED with a fallback message", body)
 	}
 }
 

@@ -1,0 +1,17 @@
+{
+  "link": {
+    "password": {
+      "prompt": {
+        "pageTitle": "Password-protected link",
+        "title": "This link is password-protected",
+        "subtitle": "Enter the password to continue to the link destination.",
+        "input_label": "Password",
+        "button": "Open link"
+      },
+      "error": {
+        "wrong": "Wrong password. Try again.",
+        "rate_limited": "Too many attempts. Try again in a minute."
+      }
+    }
+  }
+}

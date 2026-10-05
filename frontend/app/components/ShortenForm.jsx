@@ -8,6 +8,7 @@ import { fromInputValue, minInputValue } from "../../lib/expiry";
 import { sameOriginShortUrl } from "../../lib/shortlink";
 import { detectEcommerce } from "../../lib/deeplink";
 import { useTranslation } from "../../lib/I18nProvider";
+import { translateError } from "../../lib/errors";
 
 // Reusable shorten form (extracted from the homepage during the phase A
 // refactor). A pure code move: behavior and appearance unchanged: URL input,
@@ -72,9 +73,9 @@ export default function ShortenForm({ st, onSuccess }) {
       const data = await res.json();
       if (!res.ok) {
         // The error message must state WHAT went wrong and WHAT to do about it.
-        // The server sends specific messages (invalid URL, duplicate slug,
-        // etc.): this fallback exists only for responses that carry none.
-        throw new Error(data.error || t("errors.shorten.createFailed"));
+        // The server sends {code,message} (backend/internal/apierror):
+        // translate by code, fall back to the server message.
+        throw new Error(translateError(data, t, t("errors.shorten.createFailed")));
       }
       // The proxy response contains a short URL built by the backend from its
       // own request Host (http://localhost:8081/r/…). It is forced to the

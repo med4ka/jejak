@@ -6,12 +6,13 @@ import SubmitButton from "../components/SubmitButton";
 import ConfirmModal from "../components/ConfirmModal";
 import { useToast } from "../components/Toast";
 import { useTranslation } from "../../lib/I18nProvider";
+import { translateError } from "../../lib/errors";
 
 // Compact JSON fetch helper for the four /api/account/* endpoints: throws an
-// Error carrying the server's message (Go answers plain text through
-// http.Error, so the raw text is used when the body is not JSON). Every
-// action in this tab goes through it.
-async function callAccount(url, method, body, fallbackMessage) {
+// Error carrying the translated server message (Go answers {code,message}
+// JSON through internal/apierror; the raw text is used when the body is not
+// JSON). Every action in this tab goes through it.
+async function callAccount(url, method, body, t, fallbackMessage) {
   const res = await fetch(url, {
     method,
     headers: { "Content-Type": "application/json" },
@@ -22,10 +23,10 @@ async function callAccount(url, method, body, fallbackMessage) {
   try {
     data = JSON.parse(text);
   } catch {
-    /* plain-text error from Go: fall back to the raw text below */
+    /* non-JSON body: fall back to the raw text below */
   }
   if (!res.ok) {
-    throw new Error(data.error || text || fallbackMessage);
+    throw new Error(translateError({ ...data, message: data.message || data.error || text }, t, fallbackMessage));
   }
   return data;
 }
@@ -73,7 +74,7 @@ export default function PengaturanTab({ st }) {
     }
     setEmailBusy(true);
     try {
-      await callAccount("/api/account/email", "PUT", { email, password: emailPassword }, t("errors.account.requestFailed"));
+      await callAccount("/api/account/email", "PUT", { email, password: emailPassword }, t, t("errors.account.requestFailed"));
       toast.success(t("toast.emailUpdated"));
       setEmail("");
       setEmailPassword("");
@@ -107,6 +108,7 @@ export default function PengaturanTab({ st }) {
           current_password: currentPw,
           new_password: newPw,
         },
+        t,
         t("errors.account.requestFailed")
       );
       toast.success(t("toast.passwordUpdated"));
@@ -123,7 +125,7 @@ export default function PengaturanTab({ st }) {
   async function doLogoutAll() {
     setLogoutBusy(true);
     try {
-      await callAccount("/api/account/logout-all", "POST", {}, t("errors.account.requestFailed"));
+      await callAccount("/api/account/logout-all", "POST", {}, t, t("errors.account.requestFailed"));
       toast.success(t("toast.allDevicesLoggedOut"));
       // The cookie has been cleared server-side and every session revoked →
       // go straight to the landing page (a hard navigation so all dashboard
@@ -138,7 +140,7 @@ export default function PengaturanTab({ st }) {
   async function doDeleteAccount() {
     setDeleteBusy(true);
     try {
-      await callAccount("/api/account", "DELETE", { confirmation: "HAPUS", password: deletePw }, t("errors.account.requestFailed"));
+      await callAccount("/api/account", "DELETE", { confirmation: "HAPUS", password: deletePw }, t, t("errors.account.requestFailed"));
       toast.success(t("toast.accountDeleted"));
       window.location.assign("/");
     } catch (err) {

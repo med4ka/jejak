@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 
+	"jejak/internal/apierror"
 	"jejak/internal/deeplink"
 	"jejak/internal/middleware"
 	"jejak/internal/ratelimit"
@@ -21,25 +22,25 @@ import (
 // question this endpoint cannot answer, not a server failure).
 func (h *Handler) HandleDeepLinkGenerate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apierror.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 		return
 	}
 	var req struct {
 		URL string `json:"url"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "INVALID_REQUEST_BODY", "Invalid request body")
 		return
 	}
 	// Same gate as doShorten: javascript:, data:, "//evil" and empty input
 	// must never leave this handler as a "deep link" candidate.
 	if !validRemoteURL(req.URL) {
-		http.Error(w, "url must be a valid http(s) URL", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "LINK_INVALID_URL", "url must be a valid http(s) URL")
 		return
 	}
 	platform, scheme := deeplink.DetectEcommerce(req.URL)
 	if platform == "" {
-		http.Error(w, "URL is not a supported e-commerce link", http.StatusNotFound)
+		apierror.WriteError(w, http.StatusNotFound, "DEEPLINK_UNSUPPORTED", "URL is not a supported e-commerce link")
 		return
 	}
 	note := "Opens in app if installed, otherwise web"
@@ -66,7 +67,7 @@ func (h *Handler) HandleDeepLinkGenerate(w http.ResponseWriter, r *http.Request)
 // redirect like any other link.
 func (h *Handler) HandleWhatsAppLink(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apierror.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 		return
 	}
 	var req struct {
@@ -77,18 +78,18 @@ func (h *Handler) HandleWhatsAppLink(w http.ResponseWriter, r *http.Request) {
 		Shorten *bool `json:"shorten"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "INVALID_REQUEST_BODY", "Invalid request body")
 		return
 	}
 	digits, err := NormalizePhone(req.Phone)
 	if err != nil {
-		writeFieldError(w, http.StatusBadRequest, "phone", err.Error())
+		apierror.WriteFieldError(w, http.StatusBadRequest, "phone", "WHATSAPP_PHONE_INVALID", err.Error())
 		return
 	}
 	// 500 matches the UI counter; the message reaches a public URL, so the
 	// server enforces the cap instead of trusting the textarea.
 	if len([]rune(req.Message)) > 500 {
-		writeFieldError(w, http.StatusBadRequest, "message", "message must be at most 500 characters")
+		apierror.WriteFieldError(w, http.StatusBadRequest, "message", "WHATSAPP_MESSAGE_TOO_LONG", "message must be at most 500 characters")
 		return
 	}
 	waLink := buildWhatsAppLink(digits, req.Message)
@@ -103,7 +104,7 @@ func (h *Handler) HandleWhatsAppLink(w http.ResponseWriter, r *http.Request) {
 		if h.ShortenLimiter != nil {
 			if !h.ShortenLimiter.Allow(rlKey) {
 				w.Header().Set("Retry-After", "60")
-				http.Error(w, "Too many requests, try again later", http.StatusTooManyRequests)
+				apierror.WriteError(w, http.StatusTooManyRequests, "RATE_LIMIT_EXCEEDED", "Too many requests, try again later")
 				return
 			}
 			h.ShortenLimiter.Record(rlKey)
@@ -111,7 +112,7 @@ func (h *Handler) HandleWhatsAppLink(w http.ResponseWriter, r *http.Request) {
 		code, err := h.createShortLink(middleware.CreatorID(r), waLink)
 		if err != nil {
 			h.Logger.Printf("WhatsApp link createShortLink failed: %v", err)
-			http.Error(w, "Failed to store URL", http.StatusInternalServerError)
+			apierror.WriteError(w, http.StatusInternalServerError, "LINK_STORE_ERROR", "Failed to store URL")
 			return
 		}
 		resp["short_url"] = absoluteShortURL(r, code)

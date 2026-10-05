@@ -9,6 +9,7 @@ import (
 
 	"github.com/skip2/go-qrcode"
 
+	"jejak/internal/apierror"
 	"jejak/internal/db"
 	"jejak/internal/middleware"
 	"jejak/internal/shortener"
@@ -52,12 +53,12 @@ type bulkError struct {
 // defensively (the pattern used by all handlers).
 func (h *Handler) HandleBulkShorten(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apierror.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 		return
 	}
 	creatorID := middleware.CreatorID(r)
 	if creatorID == nil {
-		http.Error(w, "Login required", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Login required")
 		return
 	}
 
@@ -70,13 +71,13 @@ func (h *Handler) HandleBulkShorten(w http.ResponseWriter, r *http.Request) {
 		Tag  string   `json:"tag"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "INVALID_REQUEST_BODY", "Invalid request body")
 		return
 	}
 
 	total := len(req.URLs)
 	if total < bulkMinURLs || total > bulkMaxURLs {
-		writeFieldError(w, http.StatusBadRequest, "urls",
+		apierror.WriteFieldError(w, http.StatusBadRequest, "urls", "BULK_URLS_INVALID",
 			fmt.Sprintf("urls must contain %d-%d entries (got %d)", bulkMinURLs, bulkMaxURLs, total))
 		return
 	}
@@ -87,7 +88,7 @@ func (h *Handler) HandleBulkShorten(w http.ResponseWriter, r *http.Request) {
 	if t := strings.TrimSpace(req.Tag); t != "" {
 		tags, ok := normalizeTags([]string{t})
 		if !ok {
-			writeFieldError(w, http.StatusBadRequest, "tag", "invalid tag (1-20 chars)")
+			apierror.WriteFieldError(w, http.StatusBadRequest, "tag", "BULK_TAG_INVALID", "invalid tag (1-20 chars)")
 			return
 		}
 		if b, err := json.Marshal(tags); err == nil {
@@ -117,7 +118,7 @@ func (h *Handler) HandleBulkShorten(w http.ResponseWriter, r *http.Request) {
 		code, err := shortener.GenerateShortCode(6)
 		if err != nil {
 			h.Logger.Printf("GenerateShortCode failed: %v", err)
-			http.Error(w, "Failed to generate short code", http.StatusInternalServerError)
+			apierror.WriteError(w, http.StatusInternalServerError, "LINK_CODE_ERROR", "Failed to generate short code")
 			return
 		}
 		// Code collision ACROSS rows of the same batch: very rare (6 random
@@ -126,7 +127,7 @@ func (h *Handler) HandleBulkShorten(w http.ResponseWriter, r *http.Request) {
 		for tries := 0; batchCodes[code] && tries < 5; tries++ {
 			if code, err = shortener.GenerateShortCode(6); err != nil {
 				h.Logger.Printf("GenerateShortCode failed: %v", err)
-				http.Error(w, "Failed to generate short code", http.StatusInternalServerError)
+				apierror.WriteError(w, http.StatusInternalServerError, "LINK_CODE_ERROR", "Failed to generate short code")
 				return
 			}
 		}
@@ -142,7 +143,8 @@ func (h *Handler) HandleBulkShorten(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]any{
-			"error":   "no valid urls to import",
+			"code":    "BULK_NO_VALID_URLS",
+			"message": "no valid urls to import",
 			"errors":  failures,
 			"summary": map[string]int{"total": total, "created": 0, "failed": len(failures)},
 		})
@@ -153,7 +155,7 @@ func (h *Handler) HandleBulkShorten(w http.ResponseWriter, r *http.Request) {
 	codes, err := h.Store.CreateURLsBatch(creatorID, items)
 	if err != nil {
 		h.Logger.Printf("CreateURLsBatch failed: %v", err)
-		http.Error(w, "Database error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 		return
 	}
 
@@ -199,12 +201,12 @@ func (h *Handler) HandleBulkShorten(w http.ResponseWriter, r *http.Request) {
 // request, exactly as short_url is built in doShorten) so it scans directly.
 func (h *Handler) HandleBulkQR(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apierror.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 		return
 	}
 	creatorID := middleware.CreatorID(r)
 	if creatorID == nil {
-		http.Error(w, "Login required", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Login required")
 		return
 	}
 
@@ -212,7 +214,7 @@ func (h *Handler) HandleBulkQR(w http.ResponseWriter, r *http.Request) {
 	if filterTag != "" {
 		tags, ok := normalizeTags([]string{filterTag})
 		if !ok || len(tags) == 0 {
-			writeFieldError(w, http.StatusBadRequest, "tag", "invalid tag (1-20 chars)")
+			apierror.WriteFieldError(w, http.StatusBadRequest, "tag", "BULK_TAG_INVALID", "invalid tag (1-20 chars)")
 			return
 		}
 		filterTag = tags[0]
@@ -221,7 +223,7 @@ func (h *Handler) HandleBulkQR(w http.ResponseWriter, r *http.Request) {
 	links, err := h.Store.ListLinksByCreatorPrimary(*creatorID)
 	if err != nil {
 		h.Logger.Printf("ListLinksByCreatorPrimary failed: %v", err)
-		http.Error(w, "Database error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 		return
 	}
 
@@ -242,11 +244,11 @@ func (h *Handler) HandleBulkQR(w http.ResponseWriter, r *http.Request) {
 		matches = append(matches, l)
 	}
 	if len(matches) == 0 {
-		http.Error(w, "No links match this tag", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "QR_NO_MATCH", "No links match this tag")
 		return
 	}
 	if len(matches) > bulkQRMaxLinks {
-		writeFieldError(w, http.StatusBadRequest, "tag",
+		apierror.WriteFieldError(w, http.StatusBadRequest, "tag", "QR_TOO_MANY",
 			fmt.Sprintf("too many links (%d > %d): filter with ?tag=", len(matches), bulkQRMaxLinks))
 		return
 	}
@@ -260,7 +262,7 @@ func (h *Handler) HandleBulkQR(w http.ResponseWriter, r *http.Request) {
 		png, err := qrcode.Encode(qrURL, qrcode.Medium, 512)
 		if err != nil {
 			h.Logger.Printf("QR encode failed for %q: %v", l.ShortCode, err)
-			http.Error(w, "Failed to generate QR code", http.StatusInternalServerError)
+			apierror.WriteError(w, http.StatusInternalServerError, "QR_GENERATE_ERROR", "Failed to generate QR code")
 			return
 		}
 		pngs[i] = png

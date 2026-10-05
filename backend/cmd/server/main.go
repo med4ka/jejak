@@ -11,6 +11,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"jejak/internal/apierror"
 	"jejak/internal/auth"
 	"jejak/internal/cache"
 	"jejak/internal/db"
@@ -229,7 +230,7 @@ func main() {
 	mux.HandleFunc("GET /api/u/", func(w http.ResponseWriter, r *http.Request) {
 		username := strings.TrimPrefix(r.URL.Path, "/api/u/")
 		if username == "" || strings.Contains(username, "/") {
-			http.Error(w, "Not found", http.StatusNotFound)
+			apierror.WriteError(w, http.StatusNotFound, "NOT_FOUND", "Not found")
 			return
 		}
 		h.HandleCreatorLinks(username, w, r)

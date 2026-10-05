@@ -14,7 +14,9 @@ import (
 	"html"
 	"net/http"
 
+	"jejak/internal/apierror"
 	"jejak/internal/auth"
+	"jejak/internal/i18n"
 	"jejak/internal/ratelimit"
 )
 
@@ -45,26 +47,43 @@ func passwordVerified(r *http.Request, shortCode, hash string) bool {
 	return subtle.ConstantTimeCompare([]byte(c.Value), []byte(accessDigest(hash))) == 1
 }
 
+// Password form error kinds (the ?e=1 PRG flag and the rate-limit branch):
+// keys into the i18n dictionaries, never user-visible prose themselves.
+const (
+	passwordErrNone        = ""
+	passwordErrWrong       = "wrong"
+	passwordErrRateLimited = "rate_limited"
+)
+
 // writePasswordForm serves the gate page (200) for GET /r/{code} when the
-// password has not been verified yet. errMsg "" = clean form; non-empty =
-// shown as a red box (wrong password, or a rate-limit notice). The POST
-// target is /r/{code}/verify; on success the handler sets the cookie and
-// redirects back (PRG), so a browser refresh never resubmits the password.
-func writePasswordForm(w http.ResponseWriter, shortCode, errMsg string) {
+// password has not been verified yet. errKind "" = clean form; "wrong" /
+// "rate_limited" = red box. All copy is translated from the visitor's
+// Accept-Language (internal/i18n; default Indonesian). The POST target is
+// /r/{code}/verify; on success the handler sets the cookie and redirects
+// back (PRG), so a browser refresh never resubmits the password.
+func writePasswordForm(w http.ResponseWriter, r *http.Request, shortCode, errKind string) {
+	locale := i18n.DetectLocale(r.Header.Get("Accept-Language"))
+	// Escape even though DetectLocale only returns constants: keeps the
+	// taint-sensitive HTML writer (gosec G705) provably safe.
+	localeAttr := html.EscapeString(locale)
+	tr := func(key string) string { return html.EscapeString(i18n.Translate(locale, key)) }
+	errBox := ""
+	switch errKind {
+	case passwordErrWrong:
+		errBox = fmt.Sprintf(`<p class="err">%s</p>`, tr("link.password.error.wrong"))
+	case passwordErrRateLimited:
+		errBox = fmt.Sprintf(`<p class="err">%s</p>`, tr("link.password.error.rate_limited"))
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	code := html.EscapeString(shortCode)
-	errBox := ""
-	if errMsg != "" {
-		errBox = fmt.Sprintf(`<p class="err">%s</p>`, html.EscapeString(errMsg))
-	}
 	fmt.Fprintf(w, `<!doctype html>
-<html lang="id">
+<html lang="%s">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>Link dilindungi password</title>
+<title>%s</title>
 <style>
   body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
          background:#FAFAF7; color:#1C1A12; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
@@ -89,28 +108,34 @@ func writePasswordForm(w http.ResponseWriter, shortCode, errMsg string) {
 <main>
   <div class="card">
     <p class="brand">JEJAK</p>
-    <h1>Link ini dilindungi password</h1>
-    <p>Masukkan password untuk melanjutkan ke tujuan link.</p>
+    <h1>%s</h1>
+    <p>%s</p>
     %s
     <form method="post" action="/r/%s/verify" autocomplete="off">
-      <label for="password">Password</label>
+      <label for="password">%s</label>
       <input id="password" name="password" type="password" required minlength="4" autofocus>
-      <button type="submit">Buka link</button>
+      <button type="submit">%s</button>
     </form>
   </div>
 </main>
 </body>
 </html>
-`, errBox, code)
+`, localeAttr,
+		tr("link.password.prompt.pageTitle"),
+		tr("link.password.prompt.title"),
+		tr("link.password.prompt.subtitle"),
+		errBox, code,
+		tr("link.password.prompt.input_label"),
+		tr("link.password.prompt.button"))
 }
 
 // passwordErrorFromQuery maps the ?e=1 PRG flag (set by a failed verify
-// redirect) to the inline form error; any other query = clean form.
+// redirect) to the form error kind; any other query = clean form.
 func passwordErrorFromQuery(r *http.Request) string {
 	if r.URL.Query().Get("e") == "1" {
-		return "Password salah. Coba lagi."
+		return passwordErrWrong
 	}
-	return ""
+	return passwordErrNone
 }
 
 // HandlePasswordVerify handles POST /r/{code}/verify (form-encoded, browser
@@ -121,14 +146,14 @@ func passwordErrorFromQuery(r *http.Request) string {
 // Correct: HttpOnly cookie (SHA-256 digest, 1 hour, Path=/r/) + PRG back.
 func (h *Handler) HandlePasswordVerify(shortCode string, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apierror.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 		return
 	}
 	rlKey := ratelimit.Key(
 		ratelimit.ClientIP(r.RemoteAddr, r.Header.Get("X-Forwarded-For")), shortCode)
 	if h.VerifyLimiter != nil && !h.VerifyLimiter.Allow(rlKey) {
 		w.WriteHeader(http.StatusTooManyRequests)
-		writePasswordForm(w, shortCode, "Terlalu banyak percobaan. Coba lagi dalam satu menit.")
+		writePasswordForm(w, r, shortCode, passwordErrRateLimited)
 		return
 	}
 
@@ -139,7 +164,7 @@ func (h *Handler) HandlePasswordVerify(shortCode string, w http.ResponseWriter, 
 
 	link, err := h.Store.GetLink(shortCode)
 	if err != nil {
-		http.Error(w, "URL not found", http.StatusNotFound)
+		apierror.WriteError(w, http.StatusNotFound, "LINK_NOT_FOUND", "URL not found")
 		return
 	}
 	// The gate was removed between form render and submit: no cookie needed,

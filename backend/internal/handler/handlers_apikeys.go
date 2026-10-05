@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"jejak/internal/apierror"
 	"jejak/internal/db"
 	"jejak/internal/middleware"
 )
@@ -79,12 +80,12 @@ func keysJSON(keys []db.APIKey) []map[string]any {
 // for API key generation.
 func (h *Handler) HandleGenerateAPIKey(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apierror.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 		return
 	}
 	creatorID := middleware.CreatorID(r)
 	if creatorID == nil {
-		http.Error(w, "Login required", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Login required")
 		return
 	}
 
@@ -94,26 +95,26 @@ func (h *Handler) HandleGenerateAPIKey(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil {
 		r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err.Error() != "EOF" {
-			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			apierror.WriteError(w, http.StatusBadRequest, "INVALID_REQUEST_BODY", "Invalid request body")
 			return
 		}
 	}
 	req.Label = strings.TrimSpace(req.Label)
 	if len(req.Label) > 100 {
-		http.Error(w, "Label max 100 chars", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "APIKEY_LABEL_TOO_LONG", "Label max 100 chars")
 		return
 	}
 
 	key, err := generateAPIKey()
 	if err != nil {
 		h.Logger.Printf("GenerateAPIKey failed: %v", err)
-		http.Error(w, "Failed to generate key", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "APIKEY_GENERATE_ERROR", "Failed to generate key")
 		return
 	}
 	id, err := h.Store.StoreAPIKey(*creatorID, hashAPIKey(key), req.Label)
 	if err != nil {
 		h.Logger.Printf("StoreAPIKey failed: %v", err)
-		http.Error(w, "Failed to store key", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "APIKEY_STORE_ERROR", "Failed to store key")
 		return
 	}
 
@@ -133,19 +134,19 @@ func (h *Handler) HandleGenerateAPIKey(w http.ResponseWriter, r *http.Request) {
 // required. The plaintext key is NEVER sent: only id, label and timestamps.
 func (h *Handler) HandleListAPIKeys(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apierror.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 		return
 	}
 	creatorID := middleware.CreatorID(r)
 	if creatorID == nil {
-		http.Error(w, "Login required", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Login required")
 		return
 	}
 
 	keys, err := h.Store.ListAPIKeys(*creatorID)
 	if err != nil {
 		h.Logger.Printf("ListAPIKeys failed: %v", err)
-		http.Error(w, "Database error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -161,27 +162,27 @@ func (h *Handler) HandleListAPIKeys(w http.ResponseWriter, r *http.Request) {
 // UpdateLink/Reorder.
 func (h *Handler) HandleDeleteAPIKey(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apierror.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 		return
 	}
 	creatorID := middleware.CreatorID(r)
 	if creatorID == nil {
-		http.Error(w, "Login required", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Login required")
 		return
 	}
 	keyID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		http.Error(w, "Invalid key id", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "APIKEY_INVALID_ID", "Invalid key id")
 		return
 	}
 
 	if err := h.Store.DeleteAPIKey(*creatorID, keyID); err != nil {
 		if err == sql.ErrNoRows {
-			http.Error(w, "Unknown API key or not yours", http.StatusNotFound)
+			apierror.WriteError(w, http.StatusNotFound, "APIKEY_NOT_FOUND", "Unknown API key or not yours")
 			return
 		}
 		h.Logger.Printf("DeleteAPIKey failed (id=%d): %v", keyID, err)
-		http.Error(w, "Database error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -225,13 +226,13 @@ func (h *Handler) creatorFromAPIKey(r *http.Request) (*int64, error) {
 // under its own hash without affecting other keys.
 func (h *Handler) HandleV1Shorten(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apierror.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 		return
 	}
 
 	creatorID, err := h.creatorFromAPIKey(r)
 	if err != nil {
-		http.Error(w, "Invalid API key", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "APIKEY_INVALID", "Invalid API key")
 		return
 	}
 
@@ -242,7 +243,7 @@ func (h *Handler) HandleV1Shorten(w http.ResponseWriter, r *http.Request) {
 		keyHash := hashAPIKey(raw)
 		if !h.APILimiter.Allow(keyHash) {
 			w.Header().Set("Retry-After", "60")
-			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+			apierror.WriteError(w, http.StatusTooManyRequests, "RATE_LIMIT_EXCEEDED", "Rate limit exceeded")
 			return
 		}
 		h.APILimiter.Record(keyHash)

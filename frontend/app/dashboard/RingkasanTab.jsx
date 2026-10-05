@@ -17,6 +17,7 @@ import {
 } from "recharts";
 import { SPRING_SOFT } from "../../lib/animations";
 import { useTranslation } from "../../lib/I18nProvider";
+import { translateError } from "../../lib/errors";
 import { ShareButton } from "../components/ShareModal";
 import OnboardingChecklist from "../components/OnboardingChecklist";
 import ChartTooltip from "../components/ChartTooltip";
@@ -149,10 +150,10 @@ export default function RingkasanTab({ displayName, links, profileReady, onShare
         try {
           parsed = JSON.parse(text);
         } catch {
-          throw new Error(text || "Gagal memuat tren");
+          throw new Error(text || t("errors.analytics.trendLoad"));
         }
         if (!res.ok) {
-          throw new Error(parsed.error || "Gagal memuat tren");
+          throw new Error(translateError(parsed, t, text || t("errors.analytics.trendLoad")));
         }
         setDays(Array.isArray(parsed) ? parsed : []);
       })
@@ -165,10 +166,10 @@ export default function RingkasanTab({ displayName, links, profileReady, onShare
         try {
           parsed = JSON.parse(text);
         } catch {
-          throw new Error(text || "Gagal memuat ringkasan");
+          throw new Error(text || t("errors.analytics.summaryLoad"));
         }
         if (!res.ok) {
-          throw new Error(parsed.error || "Gagal memuat ringkasan");
+          throw new Error(translateError(parsed, t, text || t("errors.analytics.summaryLoad")));
         }
         setSummary(parsed);
       })

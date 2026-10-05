@@ -7,6 +7,7 @@ import { SPRING } from "../../lib/animations";
 import { formatLocal, fromInputValue, minuteKey, toInputValue } from "../../lib/expiry";
 import { detectEcommerce } from "../../lib/deeplink";
 import { useTranslation } from "../../lib/I18nProvider";
+import { translateError } from "../../lib/errors";
 
 const input =
   "w-full rounded-xl border-2 border-ink bg-print-white px-3 py-2 text-sm text-ink placeholder:text-muted focus:border-flash-yellow focus:ring-2 focus:ring-flash-yellow/30 focus:outline-hidden transition-all duration-150";
@@ -144,7 +145,7 @@ export default function EditLinkModal({ link, onClose, onSaved, st }) {
         throw new Error(text || t("link.health.saveFailed"));
       }
       if (!res.ok) {
-        throw new Error(data.error || text || t("link.health.saveFailed"));
+        throw new Error(translateError(data, t, text || t("link.health.saveFailed")));
       }
       onSaved();
       onClose();
@@ -176,7 +177,7 @@ export default function EditLinkModal({ link, onClose, onSaved, st }) {
         throw new Error(text || t("link.health.checkFailed"));
       }
       if (!res.ok) {
-        throw new Error(data.error || text || t("link.health.checkFailed"));
+        throw new Error(translateError(data, t, text || t("link.health.checkFailed")));
       }
       const status = data.health_status || "unknown";
       setHealthStatus(status);

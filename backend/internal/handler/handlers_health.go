@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"time"
 
+	"jejak/internal/apierror"
 	"jejak/internal/middleware"
 	"jejak/internal/ratelimit"
 )
@@ -33,24 +34,24 @@ import (
 // local state without refetching.
 func (h *Handler) HandleCheckHealth(shortCode string, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apierror.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 		return
 	}
 	creatorID := middleware.CreatorID(r)
 	if creatorID == nil {
-		http.Error(w, "Login required", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Login required")
 		return
 	}
 	rlKey := "health\x00" + ratelimit.ClientIP(r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
 	if h.HealthTriggerLimiter != nil {
 		if !h.HealthTriggerLimiter.Allow(rlKey) {
 			w.Header().Set("Retry-After", "60")
-			http.Error(w, "Too many requests, try again later", http.StatusTooManyRequests)
+			apierror.WriteError(w, http.StatusTooManyRequests, "RATE_LIMIT_EXCEEDED", "Too many requests, try again later")
 			return
 		}
 	}
 	if h.Checker == nil {
-		http.Error(w, "Health checker not available", http.StatusServiceUnavailable)
+		apierror.WriteError(w, http.StatusServiceUnavailable, "HEALTH_UNAVAILABLE", "Health checker not available")
 		return
 	}
 
@@ -58,15 +59,15 @@ func (h *Handler) HandleCheckHealth(shortCode string, w http.ResponseWriter, r *
 	link, err := h.Store.GetLink(shortCode)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			http.Error(w, "Unknown short code or not yours", http.StatusNotFound)
+			apierror.WriteError(w, http.StatusNotFound, "LINK_NOT_FOUND", "Unknown short code or not yours")
 			return
 		}
 		h.Logger.Printf("GetLink failed for %q: %v", shortCode, err)
-		http.Error(w, "Database error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 		return
 	}
 	if link.CreatorID == nil || *link.CreatorID != *creatorID {
-		http.Error(w, "Unknown short code or not yours", http.StatusNotFound)
+		apierror.WriteError(w, http.StatusNotFound, "LINK_NOT_FOUND", "Unknown short code or not yours")
 		return
 	}
 
@@ -79,11 +80,11 @@ func (h *Handler) HandleCheckHealth(shortCode string, w http.ResponseWriter, r *
 	status, err := h.Checker.CheckOne(r.Context(), shortCode)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			http.Error(w, "Unknown short code or not yours", http.StatusNotFound)
+			apierror.WriteError(w, http.StatusNotFound, "LINK_NOT_FOUND", "Unknown short code or not yours")
 			return
 		}
 		h.Logger.Printf("CheckOne failed for %q: %v", shortCode, err)
-		http.Error(w, "Failed to run health check", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "HEALTH_CHECK_FAILED", "Failed to run health check")
 		return
 	}
 
@@ -100,24 +101,24 @@ func (h *Handler) HandleCheckHealth(shortCode string, w http.ResponseWriter, r *
 // Empty feed = {"notifications":[],"unread":0}, not an error.
 func (h *Handler) HandleListNotifications(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apierror.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 		return
 	}
 	creatorID := middleware.CreatorID(r)
 	if creatorID == nil {
-		http.Error(w, "Login required", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Login required")
 		return
 	}
 	items, err := h.Store.ListNotifications(*creatorID, 50)
 	if err != nil {
 		h.Logger.Printf("ListNotifications failed: %v", err)
-		http.Error(w, "Database error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 		return
 	}
 	unread, err := h.Store.CountUnreadNotifications(*creatorID)
 	if err != nil {
 		h.Logger.Printf("CountUnreadNotifications failed: %v", err)
-		http.Error(w, "Database error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -133,26 +134,26 @@ func (h *Handler) HandleListNotifications(w http.ResponseWriter, r *http.Request
 // notification again succeeds (still 1 affected row).
 func (h *Handler) HandleMarkNotificationRead(idParam string, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apierror.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 		return
 	}
 	creatorID := middleware.CreatorID(r)
 	if creatorID == nil {
-		http.Error(w, "Login required", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Login required")
 		return
 	}
 	id, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil || id <= 0 {
-		http.Error(w, "Invalid notification id", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "NOTIFICATION_INVALID_ID", "Invalid notification id")
 		return
 	}
 	if err := h.Store.MarkNotificationRead(*creatorID, id); err != nil {
 		if err == sql.ErrNoRows {
-			http.Error(w, "Notification not found", http.StatusNotFound)
+			apierror.WriteError(w, http.StatusNotFound, "NOTIFICATION_NOT_FOUND", "Notification not found")
 			return
 		}
 		h.Logger.Printf("MarkNotificationRead failed: %v", err)
-		http.Error(w, "Database error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

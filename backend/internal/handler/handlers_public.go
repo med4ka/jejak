@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"jejak/internal/apierror"
 	"jejak/internal/db"
 )
 
@@ -19,13 +20,13 @@ import (
 func (h *Handler) HandleCreatorLinks(username string, w http.ResponseWriter, r *http.Request) {
 	creator, err := h.Store.GetCreatorByUsername(username)
 	if err != nil {
-		http.Error(w, "Creator not found", http.StatusNotFound)
+		apierror.WriteError(w, http.StatusNotFound, "PROFILE_NOT_FOUND", "Creator not found")
 		return
 	}
 
 	links, err := h.Store.ListLinksByCreator(creator.ID)
 	if err != nil {
-		http.Error(w, "Database error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 		return
 	}
 	if links == nil {

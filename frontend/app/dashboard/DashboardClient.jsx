@@ -24,6 +24,7 @@ import ThemeBackdrop from "../components/ThemeBackdrop";
 import { EASE, SPRING } from "../../lib/animations";
 import { shortPath, absoluteShortUrl } from "../../lib/shortlink";
 import { useTranslation } from "../../lib/I18nProvider";
+import { translateError } from "../../lib/errors";
 
 // API_BASE (NEXT_PUBLIC_API_URL / http://localhost:8081) REMOVED: public
 // page redirect fix, 2026-09-30. Every short URL is built from the
@@ -364,7 +365,7 @@ export default function DashboardClient() {
           throw new Error(text || t("errors.dashboard.loadProfile"));
         }
         if (!res.ok) {
-          throw new Error(data.error || t("errors.dashboard.loadProfile"));
+          throw new Error(translateError(data, t, text || t("errors.dashboard.loadProfile")));
         }
         // The username comes from the profile response: the same source the
         // navbar displays (both read /api/profile over the cookie session).
@@ -436,7 +437,7 @@ export default function DashboardClient() {
           throw new Error(text || t("errors.dashboard.loadKey"));
         }
         if (!res.ok) {
-          throw new Error(data.error || t("errors.dashboard.loadKey"));
+          throw new Error(translateError(data, t, text || t("errors.dashboard.loadKey")));
         }
         setApiKeys(Array.isArray(data) ? data : []);
       })
@@ -464,7 +465,7 @@ export default function DashboardClient() {
         throw new Error(text || t("errors.dashboard.generateKey"));
       }
       if (!res.ok) {
-        throw new Error(data.error || t("errors.dashboard.generateKey"));
+        throw new Error(translateError(data, t, text || t("errors.dashboard.generateKey")));
       }
       setGeneratedKey(data.key);
       setKeyLabel("");
@@ -493,7 +494,7 @@ export default function DashboardClient() {
         throw new Error(text || t("errors.dashboard.deleteKey"));
       }
       if (!res.ok) {
-        throw new Error(data.error || t("errors.dashboard.deleteKey"));
+        throw new Error(translateError(data, t, text || t("errors.dashboard.deleteKey")));
       }
       setKeyMsg(t("dashboard.settings.apiKeys.deletedNotice"));
       loadKeys();
@@ -633,7 +634,7 @@ export default function DashboardClient() {
       const res = await fetch(`/api/links/qr-bulk${q}`);
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || t("errors.dashboard.qrZipFailed"));
+        throw new Error(translateError(data, t, t("errors.dashboard.qrZipFailed")));
       }
       const blob = await res.blob();
       const cd = res.headers.get("Content-Disposition") || "";
@@ -724,7 +725,7 @@ export default function DashboardClient() {
         throw new Error(text || t("errors.dashboard.saveProfile"));
       }
       if (!res.ok) {
-        throw new Error(data.error || text || t("errors.dashboard.saveProfile"));
+        throw new Error(translateError(data, t, text || t("errors.dashboard.saveProfile")));
       }
       setNotice(t("dashboard.settings.profile.savedNotice"));
       // The navbar holds its OWN profile state (avatar/name) that is only

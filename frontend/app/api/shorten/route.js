@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { goErrorPayload } from "../../../lib/goError";
 
 const GO_API_URL = process.env.GO_API_URL || "http://localhost:8081";
 
@@ -29,7 +30,9 @@ export async function POST(req) {
 
   const text = await goRes.text();
   if (!goRes.ok) {
-    return NextResponse.json({ error: text || "Go API error" }, { status: goRes.status });
+    // Go answers API failures as {code,message} JSON (backend/internal/
+    // apierror): forward the code so the browser can translate by it.
+    return NextResponse.json(goErrorPayload(text, "Go API error"), { status: goRes.status });
   }
   return NextResponse.json({ shortUrl: text }, { status: 201 });
 }

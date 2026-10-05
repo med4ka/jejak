@@ -17,6 +17,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"jejak/internal/apierror"
 	"jejak/internal/auth"
 	"jejak/internal/db"
 	"jejak/internal/deeplink"
@@ -35,7 +36,7 @@ import (
 // redirect response, which must stay fast.
 func (h *Handler) HandleShorten(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apierror.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 		return
 	}
 	// 30 shorten/minute per IP: caps anonymous spam-link generation (the API
@@ -47,7 +48,7 @@ func (h *Handler) HandleShorten(w http.ResponseWriter, r *http.Request) {
 	if h.ShortenLimiter != nil {
 		if !h.ShortenLimiter.Allow(rlKey) {
 			w.Header().Set("Retry-After", "60")
-			http.Error(w, "Too many requests, try again later", http.StatusTooManyRequests)
+			apierror.WriteError(w, http.StatusTooManyRequests, "RATE_LIMIT_EXCEEDED", "Too many requests, try again later")
 			return
 		}
 		h.ShortenLimiter.Record(rlKey)
@@ -73,7 +74,7 @@ func (h *Handler) doShorten(creatorID *int64, w http.ResponseWriter, r *http.Req
 		Password string `json:"password"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "INVALID_REQUEST_BODY", "Invalid request body")
 		return
 	}
 
@@ -88,7 +89,7 @@ func (h *Handler) doShorten(creatorID *int64, w http.ResponseWriter, r *http.Req
 	// not a product target; device_rules and socials have always used
 	// validHTTPURL.
 	if !validRemoteURL(req.URL) {
-		http.Error(w, "url must be a valid http(s) URL", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "LINK_INVALID_URL", "url must be a valid http(s) URL")
 		return
 	}
 
@@ -107,23 +108,23 @@ func (h *Handler) doShorten(creatorID *int64, w http.ResponseWriter, r *http.Req
 		var err error
 		shortCode, err = shortener.GenerateShortCode(6)
 		if err != nil {
-			http.Error(w, "Failed to generate short code", http.StatusInternalServerError)
+			apierror.WriteError(w, http.StatusInternalServerError, "LINK_CODE_ERROR", "Failed to generate short code")
 			return
 		}
 	} else {
 		if !shortener.ValidSlug(shortCode) {
-			http.Error(w, "Invalid slug (3-30 chars, letters/digits/_/-)", http.StatusBadRequest)
+			apierror.WriteError(w, http.StatusBadRequest, "LINK_INVALID_SLUG", "Invalid slug (3-30 chars, letters/digits/_/-)")
 			return
 		}
 		if shortener.IsReserved(shortCode) {
-			http.Error(w, "Slug is reserved", http.StatusBadRequest)
+			apierror.WriteError(w, http.StatusBadRequest, "LINK_SLUG_RESERVED", "Slug is reserved")
 			return
 		}
 		if _, err := h.Store.GetURL(shortCode); err == nil {
-			http.Error(w, "Slug already taken", http.StatusConflict)
+			apierror.WriteError(w, http.StatusConflict, "LINK_SLUG_TAKEN", "Slug already taken")
 			return
 		} else if err != sql.ErrNoRows {
-			http.Error(w, "Database error", http.StatusInternalServerError)
+			apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 			return
 		}
 	}
@@ -134,12 +135,12 @@ func (h *Handler) doShorten(creatorID *int64, w http.ResponseWriter, r *http.Req
 	// trusted. Limits: max 5 tags, 1-20 chars each. Failure -> clear 400.
 	tags, ok := normalizeTags(req.Tags)
 	if !ok {
-		http.Error(w, "Invalid tags (max 5 tags, 1-20 chars each)", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "LINK_INVALID_TAGS", "Invalid tags (max 5 tags, 1-20 chars each)")
 		return
 	}
 	tagsJSON, err := json.Marshal(tags)
 	if err != nil {
-		http.Error(w, "Invalid tags", http.StatusBadRequest)
+		apierror.WriteError(w, http.StatusBadRequest, "LINK_INVALID_TAGS", "Invalid tags")
 		return
 	}
 
@@ -157,12 +158,12 @@ func (h *Handler) doShorten(creatorID *int64, w http.ResponseWriter, r *http.Req
 	if s := strings.TrimSpace(req.ExpiresAt); s != "" {
 		t, err := time.Parse(time.RFC3339, s)
 		if err != nil {
-			writeFieldError(w, http.StatusBadRequest, "expires_at", "expires_at must be RFC3339 UTC (contoh: 2026-10-01T09:00:00Z)")
+			apierror.WriteFieldError(w, http.StatusBadRequest, "expires_at", "LINK_EXPIRES_AT_INVALID", "expires_at must be RFC3339 UTC (contoh: 2026-10-01T09:00:00Z)")
 			return
 		}
 		u := t.UTC()
 		if !u.After(time.Now().UTC().Add(time.Hour)) {
-			writeFieldError(w, http.StatusUnprocessableEntity, "expires_at", "expires_at must be more than 1 hour in the future")
+			apierror.WriteFieldError(w, http.StatusUnprocessableEntity, "expires_at", "LINK_EXPIRES_AT_TOO_SOON", "expires_at must be more than 1 hour in the future")
 			return
 		}
 		expiresAt = &u
@@ -175,13 +176,13 @@ func (h *Handler) doShorten(creatorID *int64, w http.ResponseWriter, r *http.Req
 	passwordHash := ""
 	if pw := req.Password; pw != "" {
 		if len(pw) < 4 || len(pw) > 72 {
-			writeFieldError(w, http.StatusBadRequest, "password", "password harus 4-72 karakter")
+			apierror.WriteFieldError(w, http.StatusBadRequest, "password", "LINK_PASSWORD_INVALID", "password harus 4-72 karakter")
 			return
 		}
 		hashed, err := auth.HashPassword(pw)
 		if err != nil {
 			h.Logger.Printf("HashPassword failed: %v", err)
-			http.Error(w, "Failed to hash password", http.StatusInternalServerError)
+			apierror.WriteError(w, http.StatusInternalServerError, "LINK_PASSWORD_HASH_ERROR", "Failed to hash password")
 			return
 		}
 		passwordHash = hashed
@@ -198,11 +199,11 @@ func (h *Handler) doShorten(creatorID *int64, w http.ResponseWriter, r *http.Req
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			// Lost the check-then-insert race: someone took it first.
 			h.Logger.Printf("CreateURL race lost for %q: %v", shortCode, err)
-			http.Error(w, "Slug already taken", http.StatusConflict)
+			apierror.WriteError(w, http.StatusConflict, "LINK_SLUG_TAKEN", "Slug already taken")
 			return
 		}
 		h.Logger.Printf("CreateURL failed for %q: %v", shortCode, err)
-		http.Error(w, "Failed to store URL", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "LINK_STORE_ERROR", "Failed to store URL")
 		return
 	}
 
@@ -327,15 +328,6 @@ func redirectTTL(expiresAt *time.Time) int64 {
 	return def
 }
 
-// writeFieldError sends a field-specific JSON error (any status): used by
-// expires_at validation, which MUST name the offending field rather than emit
-// a generic message (the frontend displays per-field messages in the form).
-func writeFieldError(w http.ResponseWriter, status int, field, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{"error": msg, "field": field})
-}
-
 // writeGoneHTML answers 410 Gone with a minimal HTML page (inline styles, no
 // external assets): the expiry specification: not an http.Error plain-text
 // body like "Link disabled", but a document worth loading in a browser when a
@@ -429,7 +421,7 @@ func (h *Handler) HandleRedirect(shortCode string, w http.ResponseWriter, r *htt
 				// The cookie value is the SHA-256 of the stored hash (never
 				// the hash itself: bcrypt contains "/", not a cookie-octet).
 				if target.PasswordHash != "" && !passwordVerified(r, shortCode, target.PasswordHash) {
-					writePasswordForm(w, shortCode, passwordErrorFromQuery(r))
+					writePasswordForm(w, r, shortCode, passwordErrorFromQuery(r))
 					return
 				}
 				// Health gate: a broken destination answers IN PLACE (1s
@@ -485,7 +477,7 @@ func (h *Handler) HandleRedirect(shortCode string, w http.ResponseWriter, r *htt
 	// logClick - an unauthenticated visitor must neither populate the cache
 	// as if verified nor show up in analytics. Form render, no redirect.
 	if link.PasswordHash != "" && !passwordVerified(r, shortCode, link.PasswordHash) {
-		writePasswordForm(w, shortCode, passwordErrorFromQuery(r))
+		writePasswordForm(w, r, shortCode, passwordErrorFromQuery(r))
 		return
 	}
 
@@ -805,7 +797,7 @@ func (h *Handler) HandleGetClickCount(shortCode string, w http.ResponseWriter, r
 	// Resolve the shard owning this shortCode before querying.
 	shardDB := h.Store.GetShard(shortCode)
 	if shardDB == nil {
-		http.Error(w, "Database not available", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_UNAVAILABLE", "Database not available")
 		return
 	}
 
@@ -816,7 +808,7 @@ func (h *Handler) HandleGetClickCount(shortCode string, w http.ResponseWriter, r
 		return
 	}
 	if err != nil {
-		http.Error(w, "Database error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 		return
 	}
 
@@ -833,18 +825,18 @@ func (h *Handler) HandleGetClickCount(shortCode string, w http.ResponseWriter, r
 // /api/profile): a link the user just created must appear in their own list.
 func (h *Handler) HandleListLinks(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apierror.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 		return
 	}
 	creatorID := middleware.CreatorID(r)
 	if creatorID == nil {
-		http.Error(w, "Login required", http.StatusUnauthorized)
+		apierror.WriteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Login required")
 		return
 	}
 
 	links, err := h.Store.ListLinksByCreatorPrimary(*creatorID)
 	if err != nil {
-		http.Error(w, "Database error", http.StatusInternalServerError)
+		apierror.WriteError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Database error")
 		return
 	}
 	if links == nil {
