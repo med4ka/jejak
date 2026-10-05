@@ -11,6 +11,16 @@ Append-only log. Jangan hapus entry lama.
 
 ---
 
+## 2026-10-05: Commit + fix notifikasi flooding
+**Status:** Done
+- Merged branch upgrade/next16-tailwind4 (already merged via fast-forward)
+- Commit: 0a8f113 fix: health check notification flood cap 5+1 per creator per batch
+- Fix detail: health checker RunBatch now caps individual link_broken notifications at 5 per creator per batch, excess aggregated into single health_aggregate notification with message "Dan X link lainnya bermasalah. Cek dashboard untuk detail."
+- Frontend: NotificationsBell.jsx routes health_aggregate clicks to /dashboard?filter=broken; DashboardClient.jsx supports filter query param and shows "Hanya link rusak ✕" chip; badge shows "9+" for counts >9
+- Build: go build ./... ok
+- Smoke: health unit tests pass
+- Sisa TODO: i18n fitur baru (error Go API translate, metadata per-file)
+
 ## 2026-10-04: Link health monitor + password protection
 **Status:** Done (2 fitur; **migration 17** auto-applied; build **41 routes hijau** (2×), smoke **12/12**, `gofmt`/`go vet`/`go test ./...` semua ok, `gosec` **0** (excl G104), E2E penuh lewat **:8082 dan proxy :3000**, worker batch live **50 link/1m8s**, 7 screenshot terverifikasi)
 
