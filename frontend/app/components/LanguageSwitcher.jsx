@@ -24,8 +24,14 @@ const OPTIONS = [
   { locale: "de", short: "DE", label: "Deutsch" },
 ];
 
+// Shared with the mobile drawer's inline language expand (same native-name
+// options, no dictionary needed): the drawer renders these rows itself
+// instead of mounting a second dropdown.
+export const LANGUAGE_OPTIONS = OPTIONS;
+
 // aria-label keyed by the ACTIVE locale (native names, no dictionary key).
 const ARIA = { id: "Bahasa", en: "Language", de: "Sprache" };
+export const LANGUAGE_ARIA = ARIA;
 
 export default function LanguageSwitcher() {
   const { locale } = useTranslation();

@@ -11,6 +11,15 @@ Append-only log. Jangan hapus entry lama.
 
 ---
 
+## 2026-10-05: Redesign mobile drawer (logged-in + logged-out)
+**Status:** Done
+- **Logged-in:** CTA `+ Link Baru` full-width paling atas (mb-4) → divider → item icon 20px+label (Dashboard/LayoutDashboard, Profil/User, Notifikasi/Bell+badge coral kanan, Bahasa/Languages inline) → divider → Keluar coral (LogOut). Row: `gap-3 px-4 py-3 rounded-lg hover:bg-ink/5`, teks ikut tema (fallback ink), tanpa emoji.
+- **Notifikasi pindah ke modal terpisah** (`NotificationsModal.jsx`, z-70, max-w-sm, scroll 60vh, aggregate → `/dashboard?filter=broken`): drawer selalu pendek, tak ada panel inline. Feed logic diekstrak ke `lib/useNotifications.js` (dipakai Bell desktop + modal); `NotificationsBell.jsx` disederhanakan jadi icon-only (varian drawer dihapus).
+- **Logged-out:** Fitur accordion + Demo/FAQ → divider (my-6) → Bahasa inline expand (ID/EN/DE native + check aktif kuning, bukan dropdown absolut) → divider → Masuk ghost + Daftar Gratis primary full-width stack gap-3.
+- **Bahasa:** `LANGUAGE_OPTIONS`/`LANGUAGE_ARIA` di-export dari `LanguageSwitcher.jsx`; key baru `nav.drawer.languageLabel` (Bahasa/Language/Sprache). Header tetap brand+X (tanpa judul panjang). Drawer `overflow-y-auto`; breakpoint `< lg` (768px iPad = drawer).
+- **Verifikasi CDP** (`%TEMP%\opencode\cdp-drawer.ps1`, `%TEMP%\opencode\jejak-drawer-shots\`, 5 shot visual-ok): logged-in, logged-in+notif (modal terpisah, drawer tertutup), logged-out, logged-out+lang-expand, 320px (scrollH=clientH=700, CTA 81-129 terlihat). Label EN ("Log out") + DE ("Abmelden") tanpa bocor ID. Catatan harness: headless Chrome min-width 500px → viewport 375/320 via `Emulation.setDeviceMetricsOverride`; selector hamburger via class `lg:hidden` (aria-label DE non-ASCII rusak di PS 5.1).
+- **Gates:** `npm run build` exit 0, smoke **12/12**.
+
 ## 2026-10-05: Screenshot password form 3 bahasa
 **Status:** Done
 - Bukti visual Task 1 (form `/r/HUYEjW` via headless Chrome `--accept-lang`, profile terpisah per locale — 1 profile bersama bikin proses hang berebut lock): `%TEMP%\opencode\jejak-pw-shots\pw-form-{id,en,de}.png` (1280×900, ketiganya dicek visual: ID "Link ini dilindungi password / Buka link", EN "This link is password-protected / Open link", DE "Dieser Link ist passwortgeschützt / Link öffnen", styling neo-brutal utuh).

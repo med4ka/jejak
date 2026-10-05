@@ -45,6 +45,9 @@
       "profile": "Profile",
       "logout": "Log out"
     },
+    "drawer": {
+      "languageLabel": "Language"
+    },
     "claimMessage": "{count} links added to your account"
   },
   "landing": {

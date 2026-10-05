@@ -45,6 +45,9 @@
       "profile": "Profil",
       "logout": "Abmelden"
     },
+    "drawer": {
+      "languageLabel": "Sprache"
+    },
     "claimMessage": "{count} Links zu deinem Konto hinzugefügt"
   },
   "landing": {

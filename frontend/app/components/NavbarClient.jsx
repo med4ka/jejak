@@ -13,20 +13,23 @@
 // panel/drawer/navCircle/logoDot in lib/themes.js): never hard-coded per
 // page.
 // =====================================================================
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ChartColumnIncreasing, ChevronDown, Link2, Menu, MonitorSmartphone, Plus, QrCode, X } from "lucide-react";
+import { Bell, Check, ChartColumnIncreasing, ChevronDown, Languages, LayoutDashboard, Link2, LogOut, Menu, MonitorSmartphone, Plus, QrCode, User, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import AuthModal from "./AuthModal";
-import LanguageSwitcher from "./LanguageSwitcher";
+import LanguageSwitcher, { LANGUAGE_ARIA, LANGUAGE_OPTIONS } from "./LanguageSwitcher";
 import NotificationsBell from "./NotificationsBell";
+import NotificationsModal from "./NotificationsModal";
 import { themeStyles } from "../../lib/themes";
 import { DEFAULT_TRANSITION, EASE } from "../../lib/animations";
 import { useTranslation } from "../../lib/I18nProvider";
+import { setLocale } from "../../lib/i18n";
+import { useNotifications } from "../../lib/useNotifications";
 
 export default function NavbarClient({ isLoggedIn }) {
-  const { t: tr } = useTranslation();
+  const { t: tr, locale } = useTranslation();
   const [username, setUsername] = useState(null);
   const [modal, setModal] = useState(null);
   const [claimMsg, setClaimMsg] = useState(null);
@@ -41,6 +44,12 @@ export default function NavbarClient({ isLoggedIn }) {
   const [drawerOpen, setDrawerOpen] = useState(false); // hamburger (mobile)
   const [fiturOpen, setFiturOpen] = useState(false); // dropdown Fitur (desktop)
   const [fiturAccOpen, setFiturAccOpen] = useState(false); // accordion Fitur (drawer)
+  const [langOpen, setLangOpen] = useState(false); // inline language expand (drawer)
+  const [notifOpen, setNotifOpen] = useState(false); // notifications modal (from drawer)
+  // Drawer badge count: its own feed instance (the desktop bell and the
+  // modal each hold theirs); all read the same endpoint.
+  const { unread } = useNotifications();
+  const closeNotif = useCallback(() => setNotifOpen(false), []);
   const accountRef = useRef(null);
   const fiturRef = useRef(null);
 
@@ -170,18 +179,23 @@ export default function NavbarClient({ isLoggedIn }) {
     };
   }, [drawerOpen]);
 
-  // The "Fitur" accordion resets together with the drawer so it does not
-  // reopen in an expanded state on the next visit.
+  // The "Fitur" accordion and the language expand reset together with the
+  // drawer so neither reopens expanded on the next visit.
   useEffect(() => {
-    if (!drawerOpen) setFiturAccOpen(false);
+    if (!drawerOpen) {
+      setFiturAccOpen(false);
+      setLangOpen(false);
+    }
   }, [drawerOpen]);
 
-  // Any route change closes both menus: keyed on pathname so links outside
-  // the drawer (desktop nav, CTA) cannot leave a stale open state behind.
+  // Any route change closes both menus and the notifications modal: keyed on
+  // pathname so links outside the drawer (desktop nav, CTA) cannot leave a
+  // stale open state behind.
   useEffect(() => {
     setDrawerOpen(false);
     setMenuOpen(false);
     setFiturOpen(false);
+    setNotifOpen(false);
   }, [pathname]);
 
   async function loadProfile() {
@@ -281,8 +295,8 @@ export default function NavbarClient({ isLoggedIn }) {
   const primaryBase = "inline-flex items-center gap-1 rounded-full px-4 py-1.5 text-sm font-bold";
   const ghostBase = "inline-flex items-center rounded-full px-4 py-1.5 text-sm font-medium";
 
-  const drawerItemCls = `flex w-full rounded-xl px-4 py-3 text-sm font-medium transition-colors duration-150 ${t.text} ${t.panelHover}`;
-  const drawerDividerCls = `my-2 border-t ${t.panelRule}`;
+  const drawerDividerCls = `my-2 border-t ${t.panelRule ?? "border-ink/10"}`;
+  const drawerDividerWideCls = `my-6 border-t ${t.panelRule ?? "border-ink/10"}`;
   const drawerPanelCls = t.drawer;
 
   // "Fitur" dropdown items: exact specification styling (bg-white panel,
@@ -301,6 +315,110 @@ export default function NavbarClient({ isLoggedIn }) {
       >
         <Icon className="h-4 w-4 text-ink" strokeWidth={2.5} />
       </span>
+    );
+  }
+
+  // Drawer menu row: icon (20px) + label with room for a right-side badge
+  // (notification count) or an accordion chevron. Renders a Link when href
+  // is set, a button otherwise. Text/hover follow the page theme (the drawer
+  // panel adapts via t.drawer); the danger row stays flash-coral on every
+  // theme. No emojis: lucide icons only.
+  function DrawerRow({ icon: Icon, label, badge, href, onClick, danger, expanded, ariaLabel }) {
+    const cls = `flex w-full items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-colors duration-150 ${
+      danger ? "text-flash-coral hover:bg-flash-coral/10" : `${t.text ?? "text-ink"} ${t.panelHover ?? "hover:bg-ink/5"}`
+    }`;
+    const content = (
+      <>
+        {Icon ? <Icon className="h-5 w-5 shrink-0" strokeWidth={2} aria-hidden="true" /> : null}
+        <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+        {typeof badge === "number" && badge > 0 ? (
+          <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-flash-coral px-1 font-mono text-xs font-bold leading-none text-white">
+            {badge > 9 ? "9+" : badge}
+          </span>
+        ) : null}
+        {expanded === null || expanded === undefined ? null : (
+          <ChevronDown
+            className={`h-4 w-4 shrink-0 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}
+            strokeWidth={2.5}
+            aria-hidden="true"
+          />
+        )}
+      </>
+    );
+    if (href) {
+      return (
+        <Link href={href} onClick={onClick} aria-label={ariaLabel} className={cls}>
+          {content}
+        </Link>
+      );
+    }
+    return (
+      <button type="button" onClick={onClick} aria-label={ariaLabel} className={cls}>
+        {content}
+      </button>
+    );
+  }
+
+  // Inline language expand for the drawer (NOT a dropdown: an absolutely
+  // positioned menu would overflow the 340px drawer and overlap the CTA
+  // buttons below). Options show native names; the active one is highlighted
+  // flash-yellow. setLocale() reloads the page, so no state sync is needed.
+  function DrawerLanguage() {
+    const active = LANGUAGE_OPTIONS.find((o) => o.locale === locale) || LANGUAGE_OPTIONS[0];
+    return (
+      <div>
+        <button
+          type="button"
+          onClick={() => setLangOpen((v) => !v)}
+          aria-expanded={langOpen}
+          aria-controls="drawer-language"
+          aria-label={LANGUAGE_ARIA[locale] || LANGUAGE_ARIA.id}
+          className={`flex w-full items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-colors duration-150 ${t.text ?? "text-ink"} ${t.panelHover ?? "hover:bg-ink/5"}`}
+        >
+          <Languages className="h-5 w-5 shrink-0" strokeWidth={2} aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate text-left">
+            {tr("nav.drawer.languageLabel")}: {active.short}
+          </span>
+          <ChevronDown
+            className={`h-4 w-4 shrink-0 transition-transform duration-200 ${langOpen ? "rotate-180" : ""}`}
+            strokeWidth={2.5}
+            aria-hidden="true"
+          />
+        </button>
+        <AnimatePresence initial={false}>
+          {langOpen && (
+            <motion.div
+              id="drawer-language"
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={DEFAULT_TRANSITION}
+              className="overflow-hidden"
+            >
+              <div className="flex flex-col gap-1 py-1 pl-3">
+                {LANGUAGE_OPTIONS.map((o) => {
+                  const isActive = o.locale === active.locale;
+                  return (
+                    <button
+                      key={o.locale}
+                      type="button"
+                      onClick={() => setLocale(o.locale)}
+                      aria-current={isActive || undefined}
+                      className={`flex w-full items-center gap-3 rounded-lg px-4 py-2.5 text-sm transition-colors duration-150 hover:bg-ink/5 ${
+                        isActive ? "bg-flash-yellow font-bold text-ink" : "text-ink"
+                      }`}
+                    >
+                      <span className="w-7 shrink-0 font-mono text-xs font-bold">{o.short}</span>
+                      <span className="min-w-0 flex-1 truncate text-left">{o.label}</span>
+                      {isActive ? <Check className="h-4 w-4 shrink-0" strokeWidth={2.5} aria-hidden="true" /> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
     );
   }
 
@@ -545,11 +663,45 @@ export default function NavbarClient({ isLoggedIn }) {
 
               <nav className="flex flex-col gap-1 p-4" aria-label={tr("nav.aria.mobileMenu")}>
                 {isLoggedIn ? (
-                  AUTH_LINKS.map((item) => (
-                    <Link key={item.label} href={item.href} className={drawerItemCls}>
-                      {item.label}
+                  <>
+                    {/* Primary CTA first with clear air below it (mb-4): it
+                        must never cover the rows underneath. */}
+                    <Link
+                      href="/app"
+                      onClick={() => setDrawerOpen(false)}
+                      className={`${primaryBase} ${primaryBtnCls} mb-4 w-full justify-center py-3`}
+                    >
+                      <Plus className="h-4 w-4" strokeWidth={2.5} aria-hidden="true" />
+                      {tr("nav.cta.newLink")}
                     </Link>
-                  ))
+                    <div className={drawerDividerCls} />
+                    <DrawerRow
+                      icon={LayoutDashboard}
+                      label={tr("nav.menu.dashboard")}
+                      href="/dashboard"
+                      onClick={() => setDrawerOpen(false)}
+                    />
+                    <DrawerRow
+                      icon={User}
+                      label={tr("nav.account.profile")}
+                      href="/dashboard"
+                      onClick={() => setDrawerOpen(false)}
+                    />
+                    {/* Notifications live in a separate modal (not an inline
+                        panel): the drawer stays a short menu. */}
+                    <DrawerRow
+                      icon={Bell}
+                      label={tr("notifications.title")}
+                      badge={unread}
+                      onClick={() => {
+                        setDrawerOpen(false);
+                        setNotifOpen(true);
+                      }}
+                    />
+                    <DrawerLanguage />
+                    <div className={drawerDividerCls} />
+                    <DrawerRow icon={LogOut} label={tr("nav.account.logout")} onClick={logout} danger />
+                  </>
                 ) : (
                   <>
                     {/* "Fitur": accordion: tap to expand the four entries */}
@@ -558,11 +710,11 @@ export default function NavbarClient({ isLoggedIn }) {
                       onClick={() => setFiturAccOpen((v) => !v)}
                       aria-expanded={fiturAccOpen}
                       aria-controls="fitur-accordion"
-                      className={`${drawerItemCls} justify-between`}
+                      className={`flex w-full items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-colors duration-150 ${t.text ?? "text-ink"} ${t.panelHover ?? "hover:bg-ink/5"}`}
                     >
-                      <span>{tr("nav.menu.features")}</span>
+                      <span className="min-w-0 flex-1 truncate text-left">{tr("nav.menu.features")}</span>
                       <ChevronDown
-                        className={`h-4 w-4 transition-transform duration-200 ${
+                        className={`h-4 w-4 shrink-0 transition-transform duration-200 ${
                           fiturAccOpen ? "rotate-180" : ""
                         }`}
                         strokeWidth={2.5}
@@ -602,63 +754,38 @@ export default function NavbarClient({ isLoggedIn }) {
                       )}
                     </AnimatePresence>
                     {PUBLIC_LINKS.map((item) => (
-                      <Link
+                      <DrawerRow
                         key={item.label}
+                        label={item.label}
                         href={item.href}
                         onClick={() => setDrawerOpen(false)}
-                        className={drawerItemCls}
-                      >
-                        {item.label}
-                      </Link>
+                      />
                     ))}
-                  </>
-                )}
-
-                <div className={drawerDividerCls} />
-
-                <LanguageSwitcher />
-
-                {isLoggedIn ? (
-                  <>
-                    <Link
-                      href="/app"
-                      className={`${primaryBase} ${primaryBtnCls} w-full justify-center py-3`}
-                    >
-                      <Plus className="h-4 w-4" strokeWidth={2.5} aria-hidden="true" />
-                      {tr("nav.cta.newLink")}
-                    </Link>
-                    <Link href="/dashboard" className={`${drawerItemCls} mt-2`}>
-                      {tr("nav.account.profile")}
-                    </Link>
-                    {/* Health-monitor notifications (mobile drawer): same
-                        feed as the desktop bell, in-flow panel. */}
-                    <NotificationsBell t={t} variant="drawer" triggerClassName={drawerItemCls} />
-                    <button type="button" onClick={logout} className={drawerItemCls}>
-                      {tr("nav.account.logout")}
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDrawerOpen(false);
-                        setModal("login");
-                      }}
-                      className={`${ghostBase} ${ghostBtnCls} w-full justify-center py-3`}
-                    >
-                      {tr("nav.cta.login")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDrawerOpen(false);
-                        setModal("register");
-                      }}
-                      className={`${primaryBase} ${primaryBtnCls} mt-2 w-full justify-center py-3`}
-                    >
-                      {tr("nav.cta.register")}
-                    </button>
+                    <div className={drawerDividerWideCls} />
+                    <DrawerLanguage />
+                    <div className={drawerDividerWideCls} />
+                    <div className="flex flex-col gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDrawerOpen(false);
+                          setModal("login");
+                        }}
+                        className={`${ghostBase} ${ghostBtnCls} w-full justify-center py-3`}
+                      >
+                        {tr("nav.cta.login")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDrawerOpen(false);
+                          setModal("register");
+                        }}
+                        className={`${primaryBase} ${primaryBtnCls} w-full justify-center py-3`}
+                      >
+                        {tr("nav.cta.register")}
+                      </button>
+                    </div>
                   </>
                 )}
               </nav>
@@ -677,6 +804,8 @@ export default function NavbarClient({ isLoggedIn }) {
           />
         )}
       </AnimatePresence>
+
+      <NotificationsModal open={notifOpen} onClose={closeNotif} t={t} />
 
       <AnimatePresence>
         {claimMsg !== null && (

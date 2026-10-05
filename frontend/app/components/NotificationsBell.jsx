@@ -1,16 +1,13 @@
 "use client";
 
 // =====================================================================
-// NOTIFICATIONS BELL (navbar, health monitor): unread badge + dropdown
-// feed fed by GET /api/notifications (in-app only: the backend has no
-// email/SMS infrastructure, see PROGRESS). An item is marked read via
+// NOTIFICATIONS BELL (navbar desktop): unread badge + dropdown feed fed by
+// GET /api/notifications (in-app only: the backend has no email/SMS
+// infrastructure, see PROGRESS). An item is marked read via
 // PUT /api/notifications/{id}/read and drops out of the unread count.
-// Two placements share this component:
-//   - variant "icon"   : round bell button, absolute dropdown (desktop nav)
-//   - variant "drawer" : full-width row button, in-flow panel (mobile)
-// Copy comes from messages/*.json via useTranslation (tr); the `t` prop
-// carries THEME TOKENS (t.panel, t.textMuted, ...) from NavbarClient, where
-// `t` is the theme object and the translator is aliased `tr`.
+// Feed state lives in lib/useNotifications (shared with the mobile
+// NotificationsModal). Copy comes from messages/*.json via useTranslation
+// (tr); the `t` prop carries THEME TOKENS (t.navCircle, t.panel, ...).
 // =====================================================================
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -18,35 +15,15 @@ import { Bell } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { formatLocal } from "../../lib/expiry";
 import { EASE } from "../../lib/animations";
+import { useNotifications } from "../../lib/useNotifications";
 import { useTranslation } from "../../lib/I18nProvider";
 
-export default function NotificationsBell({ t, variant = "icon", triggerClassName = "" }) {
+export default function NotificationsBell({ t }) {
   const { t: tr } = useTranslation();
-  const [unread, setUnread] = useState(0);
+  const { unread, items, loading, loadList, markRead, refreshUnread } = useNotifications();
   const [open, setOpen] = useState(false);
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(false);
   const wrapRef = useRef(null);
   const router = useRouter();
-
-  // Unread count on mount (cheap single-row query; failures stay silent:
-  // the bell is decoration, never a blocker for navigation).
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const res = await fetch("/api/notifications");
-        if (!res.ok || !alive) return;
-        const data = await res.json();
-        if (alive && typeof data.unread === "number") setUnread(data.unread);
-      } catch {
-        // network/offline: keep the previous count
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
 
   // Outside click / Escape closes the dropdown, attached only while open.
   useEffect(() => {
@@ -67,21 +44,6 @@ export default function NotificationsBell({ t, variant = "icon", triggerClassNam
     };
   }, [open]);
 
-  async function loadList() {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/notifications");
-      if (!res.ok) return;
-      const data = await res.json();
-      if (Array.isArray(data.notifications)) setItems(data.notifications);
-      if (typeof data.unread === "number") setUnread(data.unread);
-    } catch {
-      // keep the previous list
-    } finally {
-      setLoading(false);
-    }
-  }
-
   async function toggle() {
     const next = !open;
     setOpen(next);
@@ -89,33 +51,7 @@ export default function NotificationsBell({ t, variant = "icon", triggerClassNam
       loadList();
     } else {
       // Re-sync the badge after reading (or missing) items.
-      try {
-        const res = await fetch("/api/notifications");
-        if (res.ok) {
-          const data = await res.json();
-          if (typeof data.unread === "number") setUnread(data.unread);
-        }
-      } catch {
-        // ignore
-      }
-    }
-  }
-
-  async function markRead(n) {
-    if (n.read) return;
-    // Optimistic: flip locally first so the row de-bolds instantly; roll the
-    // badge back on failure.
-    setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
-    setUnread((u) => Math.max(0, u - 1));
-    try {
-      const res = await fetch(`/api/notifications/${n.id}/read`, { method: "PUT" });
-      if (!res.ok) {
-        setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: false } : x)));
-        setUnread((u) => u + 1);
-      }
-    } catch {
-      setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: false } : x)));
-      setUnread((u) => u + 1);
+      refreshUnread();
     }
   }
 
@@ -130,37 +66,24 @@ export default function NotificationsBell({ t, variant = "icon", triggerClassNam
     }
   }
 
-  const isDrawer = variant === "drawer";
-  const trigger =
-    variant === "icon"
-      ? `relative flex h-10 w-10 items-center justify-center rounded-full ${t.navCircle ?? ""}`
-      : `${triggerClassName} justify-between`;
-
-  const panel = isDrawer
-    ? `mt-1 w-full overflow-hidden rounded-xl border-2 border-ink ${t.panel ?? ""}`
-    : `absolute right-0 top-full z-50 mt-2 w-[min(88vw,340px)] origin-top-right ${t.radiusLarge ?? ""} ${t.panel ?? ""} border-2 border-ink`;
+  const panel = `absolute right-0 top-full z-50 mt-2 w-[min(88vw,340px)] origin-top-right ${t.radiusLarge ?? ""} ${t.panel ?? ""} border-2 border-ink`;
 
   return (
-    <div ref={wrapRef} className={isDrawer ? "relative" : "relative"}>
+    <div ref={wrapRef} className="relative">
       <button
         type="button"
         onClick={toggle}
         aria-expanded={open}
         aria-haspopup="true"
         aria-label={unread > 0 ? tr("notifications.ariaWithCount", { count: unread }) : tr("notifications.title")}
-        className={trigger}
+        className={`relative flex h-10 w-10 items-center justify-center rounded-full ${t.navCircle ?? ""}`}
       >
         <Bell className="h-5 w-5" strokeWidth={2.5} aria-hidden="true" />
         {unread > 0 && (
-          <span
-            className={`absolute flex items-center justify-center rounded-full border-2 border-ink bg-flash-coral px-1 font-mono text-[10px] font-bold leading-none text-print-white ${
-              isDrawer ? "right-8 top-1/2 -translate-y-1/2" : "-right-1 -top-1 h-5 min-w-5"
-            }`}
-          >
+          <span className="-right-1 -top-1 absolute flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-ink bg-flash-coral px-1 font-mono text-[10px] font-bold leading-none text-print-white">
             {unread > 9 ? "9+" : unread}
           </span>
         )}
-        {isDrawer && <span>{tr("notifications.drawerLabel", { count: unread > 0 ? ` (${unread})` : "" })}</span>}
       </button>
 
       <AnimatePresence>

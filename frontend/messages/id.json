@@ -45,6 +45,9 @@
       "profile": "Profil",
       "logout": "Keluar"
     },
+    "drawer": {
+      "languageLabel": "Bahasa"
+    },
     "claimMessage": "{count} link berhasil ditambahkan ke akunmu"
   },
   "landing": {
