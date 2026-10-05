@@ -11,6 +11,14 @@ Append-only log. Jangan hapus entry lama.
 
 ---
 
+## 2026-10-05: Drawer polish (language pill + remove Profil) + title simplification
+**Status:** Done
+- **Bahasa kembali ke pill + dropdown** (`DrawerLanguage` di `NavbarClient.jsx`): pill `border-2 rounded-full px-3 py-1.5` (icon 14px + short + chevron), menu in-flow `rounded-12px border-2 shadow keras` (ID/EN/DE + check aktif kuning). In-flow dipilih ganti absolute+mb-16: menu asli ~136px > 64px sehingga absolute tetap overlap; in-flow mendorong konten (terbukti Masuk 371→507, Keluar 327→463) dan aman di 320px.
+- **Hapus Profil** dari drawer logged-in (redundan: tab Profil ada di dashboard); tak ada link `?tab=profil` di repo. Urutan: + Link Baru → Dashboard → Notifikasi+badge → Bahasa → Keluar.
+- **Title:** `metadata.title` → `"Jejak"` (3 dict; og:title/twitter ikut — preview WA = "Jejak"), `dashboard/page.jsx` → `"Dashboard"`, `/u/[username]` tetap `"{display} (@{user}): Jejak"` (terverifikasi di RSC payload).
+- **Dua bug nyata diperbaiki saat verifikasi:** (1) `SPRING` tak di-import di NavbarClient → klik pill crash se-halaman (`ReferenceError`, lolos build karena Turbopack tak cek identifier); (2) `DrawerLanguage`/`DrawerRow` nested di dalam komponen → remount tiap render reset state `open` (pindah ke module scope). Keduanya hanya terlihat di runtime CDP, bukan build.
+- **Verifikasi CDP** (`jejak-drawer-shots/`, 375px via metrics-override karena min-width headless 500px): logged-in (tanpa Profil), logged-out, dropdown-open (menu penuh, Keluar terdorong), 320px (dropdown in-view). Label EN/DE tanpa bocor ID. Build exit 0, smoke **12/12**.
+
 ## 2026-10-05: Redesign mobile drawer (logged-in + logged-out)
 **Status:** Done
 - **Logged-in:** CTA `+ Link Baru` full-width paling atas (mb-4) → divider → item icon 20px+label (Dashboard/LayoutDashboard, Profil/User, Notifikasi/Bell+badge coral kanan, Bahasa/Languages inline) → divider → Keluar coral (LogOut). Row: `gap-3 px-4 py-3 rounded-lg hover:bg-ink/5`, teks ikut tema (fallback ink), tanpa emoji.

@@ -16,14 +16,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Bell, Check, ChartColumnIncreasing, ChevronDown, Languages, LayoutDashboard, Link2, LogOut, Menu, MonitorSmartphone, Plus, QrCode, User, X } from "lucide-react";
+import { Bell, Check, ChartColumnIncreasing, ChevronDown, Languages, LayoutDashboard, Link2, LogOut, Menu, MonitorSmartphone, Plus, QrCode, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import AuthModal from "./AuthModal";
 import LanguageSwitcher, { LANGUAGE_ARIA, LANGUAGE_OPTIONS } from "./LanguageSwitcher";
 import NotificationsBell from "./NotificationsBell";
 import NotificationsModal from "./NotificationsModal";
 import { themeStyles } from "../../lib/themes";
-import { DEFAULT_TRANSITION, EASE } from "../../lib/animations";
+import { DEFAULT_TRANSITION, EASE, SPRING } from "../../lib/animations";
 import { useTranslation } from "../../lib/I18nProvider";
 import { setLocale } from "../../lib/i18n";
 import { useNotifications } from "../../lib/useNotifications";
@@ -44,7 +44,6 @@ export default function NavbarClient({ isLoggedIn }) {
   const [drawerOpen, setDrawerOpen] = useState(false); // hamburger (mobile)
   const [fiturOpen, setFiturOpen] = useState(false); // dropdown Fitur (desktop)
   const [fiturAccOpen, setFiturAccOpen] = useState(false); // accordion Fitur (drawer)
-  const [langOpen, setLangOpen] = useState(false); // inline language expand (drawer)
   const [notifOpen, setNotifOpen] = useState(false); // notifications modal (from drawer)
   // Drawer badge count: its own feed instance (the desktop bell and the
   // modal each hold theirs); all read the same endpoint.
@@ -179,12 +178,11 @@ export default function NavbarClient({ isLoggedIn }) {
     };
   }, [drawerOpen]);
 
-  // The "Fitur" accordion and the language expand reset together with the
-  // drawer so neither reopens expanded on the next visit.
+  // The "Fitur" accordion resets together with the drawer so it does not
+  // reopen in an expanded state on the next visit.
   useEffect(() => {
     if (!drawerOpen) {
       setFiturAccOpen(false);
-      setLangOpen(false);
     }
   }, [drawerOpen]);
 
@@ -356,69 +354,6 @@ export default function NavbarClient({ isLoggedIn }) {
       <button type="button" onClick={onClick} aria-label={ariaLabel} className={cls}>
         {content}
       </button>
-    );
-  }
-
-  // Inline language expand for the drawer (NOT a dropdown: an absolutely
-  // positioned menu would overflow the 340px drawer and overlap the CTA
-  // buttons below). Options show native names; the active one is highlighted
-  // flash-yellow. setLocale() reloads the page, so no state sync is needed.
-  function DrawerLanguage() {
-    const active = LANGUAGE_OPTIONS.find((o) => o.locale === locale) || LANGUAGE_OPTIONS[0];
-    return (
-      <div>
-        <button
-          type="button"
-          onClick={() => setLangOpen((v) => !v)}
-          aria-expanded={langOpen}
-          aria-controls="drawer-language"
-          aria-label={LANGUAGE_ARIA[locale] || LANGUAGE_ARIA.id}
-          className={`flex w-full items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-colors duration-150 ${t.text ?? "text-ink"} ${t.panelHover ?? "hover:bg-ink/5"}`}
-        >
-          <Languages className="h-5 w-5 shrink-0" strokeWidth={2} aria-hidden="true" />
-          <span className="min-w-0 flex-1 truncate text-left">
-            {tr("nav.drawer.languageLabel")}: {active.short}
-          </span>
-          <ChevronDown
-            className={`h-4 w-4 shrink-0 transition-transform duration-200 ${langOpen ? "rotate-180" : ""}`}
-            strokeWidth={2.5}
-            aria-hidden="true"
-          />
-        </button>
-        <AnimatePresence initial={false}>
-          {langOpen && (
-            <motion.div
-              id="drawer-language"
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={DEFAULT_TRANSITION}
-              className="overflow-hidden"
-            >
-              <div className="flex flex-col gap-1 py-1 pl-3">
-                {LANGUAGE_OPTIONS.map((o) => {
-                  const isActive = o.locale === active.locale;
-                  return (
-                    <button
-                      key={o.locale}
-                      type="button"
-                      onClick={() => setLocale(o.locale)}
-                      aria-current={isActive || undefined}
-                      className={`flex w-full items-center gap-3 rounded-lg px-4 py-2.5 text-sm transition-colors duration-150 hover:bg-ink/5 ${
-                        isActive ? "bg-flash-yellow font-bold text-ink" : "text-ink"
-                      }`}
-                    >
-                      <span className="w-7 shrink-0 font-mono text-xs font-bold">{o.short}</span>
-                      <span className="min-w-0 flex-1 truncate text-left">{o.label}</span>
-                      {isActive ? <Check className="h-4 w-4 shrink-0" strokeWidth={2.5} aria-hidden="true" /> : null}
-                    </button>
-                  );
-                })}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
     );
   }
 
@@ -681,14 +616,9 @@ export default function NavbarClient({ isLoggedIn }) {
                       href="/dashboard"
                       onClick={() => setDrawerOpen(false)}
                     />
-                    <DrawerRow
-                      icon={User}
-                      label={tr("nav.account.profile")}
-                      href="/dashboard"
-                      onClick={() => setDrawerOpen(false)}
-                    />
                     {/* Notifications live in a separate modal (not an inline
-                        panel): the drawer stays a short menu. */}
+                        panel): the drawer stays a short menu. Profile editing
+                        lives in the dashboard's Profil tab: no separate row. */}
                     <DrawerRow
                       icon={Bell}
                       label={tr("notifications.title")}
@@ -698,7 +628,7 @@ export default function NavbarClient({ isLoggedIn }) {
                         setNotifOpen(true);
                       }}
                     />
-                    <DrawerLanguage />
+                    <DrawerLanguage locale={locale} />
                     <div className={drawerDividerCls} />
                     <DrawerRow icon={LogOut} label={tr("nav.account.logout")} onClick={logout} danger />
                   </>
@@ -762,7 +692,7 @@ export default function NavbarClient({ isLoggedIn }) {
                       />
                     ))}
                     <div className={drawerDividerWideCls} />
-                    <DrawerLanguage />
+                    <DrawerLanguage locale={locale} />
                     <div className={drawerDividerWideCls} />
                     <div className="flex flex-col gap-3">
                       <button
@@ -806,7 +736,6 @@ export default function NavbarClient({ isLoggedIn }) {
       </AnimatePresence>
 
       <NotificationsModal open={notifOpen} onClose={closeNotif} t={t} />
-
       <AnimatePresence>
         {claimMsg !== null && (
           <div className="pointer-events-none fixed inset-x-0 bottom-6 z-[70] flex justify-center">
@@ -823,5 +752,91 @@ export default function NavbarClient({ isLoggedIn }) {
         )}
       </AnimatePresence>
     </>
+  );
+}
+
+// Pill language switcher for the drawer (module scope: a nested definition
+// would recreate the component type on every NavbarClient render, unmounting
+// it and wiping the dropdown's open state whenever the parent re-renders,
+// e.g. when the unread-count fetch resolves). Classic pill + dropdown card.
+// The menu is IN-FLOW (relative, pushes content down) rather than absolute:
+// an absolute menu would need ~140px of permanently reserved space to clear
+// the rows below, leaving a crater when closed; in-flow cannot overlap by
+// construction and stays inside the 340px drawer at 320px viewports.
+// Options show native names; the active one is highlighted flash-yellow.
+// setLocale() reloads the page, so no state sync is needed.
+function DrawerLanguage({ locale }) {
+  const active = LANGUAGE_OPTIONS.find((o) => o.locale === locale) || LANGUAGE_OPTIONS[0];
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    function onDoc(e) {
+      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
+    }
+    function onKey(e) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  return (
+    <div ref={rootRef} className="relative z-20">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={LANGUAGE_ARIA[locale] || LANGUAGE_ARIA.id}
+        className="inline-flex items-center gap-1.5 rounded-full border-2 border-ink bg-white px-3 py-1.5 text-sm font-bold text-ink transition-colors duration-150 hover:bg-ink/5"
+      >
+        <Languages className="h-3.5 w-3.5" strokeWidth={2.5} aria-hidden="true" />
+        {active.short}
+        <ChevronDown
+          className={`h-3.5 w-3.5 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+          strokeWidth={2.5}
+          aria-hidden="true"
+        />
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            role="menu"
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.96 }}
+              transition={SPRING}
+              className="mt-2 w-full origin-top rounded-[12px] border-2 border-ink bg-white p-2 shadow-[4px_4px_0_#1C1A12]"
+            >
+            {LANGUAGE_OPTIONS.map((o) => {
+              const isActive = o.locale === active.locale;
+              return (
+                <button
+                  key={o.locale}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setOpen(false);
+                    setLocale(o.locale);
+                  }}
+                  aria-current={isActive || undefined}
+                  className={`flex w-full items-center gap-2 rounded-[8px] px-3 py-2 text-left text-sm text-ink transition-colors duration-150 hover:bg-ink/5 ${
+                    isActive ? "bg-flash-yellow font-bold" : ""
+                  }`}
+                >
+                  <span className="w-7 shrink-0 font-mono text-xs font-bold">{o.short}</span>
+                  <span className="min-w-0 flex-1 truncate">{o.label}</span>
+                  {isActive ? <Check className="h-4 w-4 shrink-0" strokeWidth={2.5} aria-hidden="true" /> : null}
+                </button>
+              );
+            })}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
