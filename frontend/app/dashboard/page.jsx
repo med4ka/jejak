@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import DashboardClient from "./DashboardClient";
 
 // Server wrapper so /dashboard can declare its own clear title (client
@@ -10,7 +11,12 @@ export const metadata = {
 export default function DashboardPage() {
   return (
     <div className="mx-auto w-full max-w-2xl px-4 pb-16 pt-24">
-      <DashboardClient />
+      {/* Suspense: DashboardClient reads ?filter=broken via useSearchParams
+          (bell aggregate); a Client Component with useSearchParams inside a
+          prerendered page must sit behind a boundary or the build fails. */}
+      <Suspense fallback={null}>
+        <DashboardClient />
+      </Suspense>
     </div>
   );
 }

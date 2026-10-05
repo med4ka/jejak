@@ -7,8 +7,10 @@ package health
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -282,5 +284,91 @@ func TestRunBatchChecksDueLinks(t *testing.T) {
 	}
 	if len(store.updates) != 2 {
 		t.Fatalf("updates = %d, want 2", len(store.updates))
+	}
+}
+
+// TestRunBatchCapsAndAggregates (anti-flood, 2026-10-04): one batch caps
+// INDIVIDUAL link_broken rows at NotifyCapPerUser per creator and folds the
+// remainder into ONE health_aggregate row; creators under the cap and
+// anonymous links never aggregate. Every owned broken link still gets its
+// marker stamped (aggregate covers them = no re-notify next run).
+func TestRunBatchCapsAndAggregates(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	creatorA, creatorB := int64(11), int64(22)
+	store := newFakeStore()
+	store.due = nil
+	add := func(code string, creator *int64) {
+		l := db.Link{ShortCode: code, OriginalURL: srv.URL, CreatorID: creator, HealthStatus: StatusUnknown}
+		store.links[code] = l
+		store.due = append(store.due, l)
+	}
+	for i := 1; i <= 8; i++ { // A: 8 broken owned -> 5 individual + aggregate(3)
+		add(fmt.Sprintf("a%02d", i), &creatorA)
+	}
+	for i := 1; i <= 3; i++ { // B: 3 < cap -> individual only, NO aggregate
+		add(fmt.Sprintf("b%02d", i), &creatorB)
+	}
+	add("anon01", nil) // anonymous: no recipient at all
+
+	c := &Checker{Store: store, Spacing: time.Millisecond}
+	done, err := c.RunBatch(context.Background())
+	if err != nil {
+		t.Fatalf("RunBatch: %v", err)
+	}
+	if done != 12 {
+		t.Fatalf("done = %d, want 12", done)
+	}
+
+	var indA, aggA, indB, aggB, anon int
+	var aggMsg string
+	for _, n := range store.notifs {
+		switch {
+		case n.creatorID == 11 && n.typ == "link_broken":
+			indA++
+		case n.creatorID == 11 && n.typ == "health_aggregate":
+			aggA++
+			aggMsg = n.message
+			if n.code != "" {
+				t.Fatalf("aggregate short_code = %q, want empty", n.code)
+			}
+		case n.creatorID == 22 && n.typ == "link_broken":
+			indB++
+		case n.creatorID == 22 && n.typ == "health_aggregate":
+			aggB++
+		case n.creatorID == 0:
+			anon++
+		}
+	}
+	if indA != 5 {
+		t.Fatalf("creator A individual = %d, want cap %d", indA, NotifyCapPerUser)
+	}
+	if aggA != 1 {
+		t.Fatalf("creator A aggregates = %d, want 1", aggA)
+	}
+	if want := fmt.Sprintf("Dan %d link lainnya bermasalah", 8-NotifyCapPerUser); !strings.Contains(aggMsg, want) {
+		t.Fatalf("aggregate message = %q, want it to contain %q", aggMsg, want)
+	}
+	if indB != 3 || aggB != 0 {
+		t.Fatalf("creator B = %d individual + %d aggregate, want 3 + 0 (under cap)", indB, aggB)
+	}
+	if anon != 0 {
+		t.Fatalf("anonymous notifications = %d, want 0", anon)
+	}
+	if total := len(store.notifs); total != 9 {
+		t.Fatalf("total notifications = %d, want 9 (5+1 A, 3 B)", total)
+	}
+	// Markers: all 11 owned broken links stamped (covered by individual or
+	// aggregate rows); the anonymous one keeps NULL (zero time here).
+	stamped := 0
+	for _, u := range store.updates {
+		if !u.notifiedAt.IsZero() {
+			stamped++
+		}
+	}
+	if stamped != 11 {
+		t.Fatalf("stamped markers = %d, want 11 (owned only)", stamped)
 	}
 }

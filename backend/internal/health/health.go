@@ -14,6 +14,7 @@ package health
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -48,6 +49,14 @@ const (
 	// worker cadence (spec: every 6 hours).
 	BatchLimit    = 50
 	BatchInterval = 6 * time.Hour
+	// NotifyCapPerUser bounds how many INDIVIDUAL link_broken notifications
+	// ONE batch may create per creator (anti-flood, 2026-10-04): every
+	// further first-breakage of the same run collapses into ONE
+	// health_aggregate row ("Dan N link lainnya bermasalah..."). Without
+	// the cap the first live batch wrote ~58 rows at once and buried the
+	// bell; with it a user sees at most 5 + 1 = 6 rows per batch. The
+	// manual single check never aggregates (one link per call = no flood).
+	NotifyCapPerUser = 5
 	// defaultSpacing keeps the batch within 50 requests/minute
 	// (60s / 50 = 1.2s). Tests shrink it.
 	defaultSpacing = 1200 * time.Millisecond
@@ -154,6 +163,55 @@ func (c *Checker) logf(format string, args ...any) {
 	}
 }
 
+// notifyBudget is the per-run anti-flood ledger (Checker.RunBatch): at most
+// NotifyCapPerUser individual link_broken rows per creator, the remainder
+// counted for ONE health_aggregate row written when the batch ends (flush).
+// A nil *notifyBudget means "not batching" - the manual single check, where
+// every first breakage notifies immediately (one link per call cannot
+// flood). The ledger is not concurrency-safe by design: RunBatch is
+// sequential.
+type notifyBudget struct {
+	individual map[int64]int
+	aggregate  map[int64]int
+}
+
+func newNotifyBudget() *notifyBudget {
+	return &notifyBudget{individual: map[int64]int{}, aggregate: map[int64]int{}}
+}
+
+// take records one covered first-breakage for creator and reports whether
+// an individual notification must be created NOW. The caller has already
+// stamped health_notified_at (persist-before-notify, at-most-once): links
+// that fall into the aggregate are covered by the batch row, so they must
+// not notify again on the next run.
+func (b *notifyBudget) take(creatorID int64) bool {
+	if b == nil {
+		return true
+	}
+	if b.individual[creatorID] < NotifyCapPerUser {
+		b.individual[creatorID]++
+		return true
+	}
+	b.aggregate[creatorID]++
+	return false
+}
+
+// flush writes the single health_aggregate row per creator whose links went
+// beyond the cap. Errors are logged, never fatal - the batch already did
+// its job and the markers are stamped (at-most-once: a crash here loses the
+// aggregate rather than double-notifying next run).
+func (b *notifyBudget) flush(c *Checker) {
+	if b == nil {
+		return
+	}
+	for creatorID, n := range b.aggregate {
+		msg := fmt.Sprintf("Dan %d link lainnya bermasalah. Cek dashboard untuk detail.", n)
+		if _, err := c.Store.CreateNotification(creatorID, "health_aggregate", "", msg); err != nil {
+			c.logf("Warning: aggregate health notification for creator %d failed: %v", creatorID, err)
+		}
+	}
+}
+
 // CheckOne probes the destination of one short code and persists the
 // outcome. Returns the stored status.
 //
@@ -166,9 +224,18 @@ func (c *Checker) logf(format string, args ...any) {
 // BEFORE the notification insert: a crash in between loses one
 // notification rather than risking duplicates (at-most-once).
 //
+// CheckOne is the manual check (nil budget = always individual, see
+// notifyBudget); the worker batch goes through checkOne with the per-run
+// ledger so dozens of first-breakages collapse into 5 + 1 rows per creator.
+//
 // The redirect cache is evicted only when the status actually CHANGED - a
 // no-op probe must not cost a Redis DEL.
 func (c *Checker) CheckOne(ctx context.Context, shortCode string) (string, error) {
+	return c.checkOne(ctx, shortCode, nil)
+}
+
+// checkOne is CheckOne with the batch's anti-flood ledger (nil = manual).
+func (c *Checker) checkOne(ctx context.Context, shortCode string, budget *notifyBudget) (string, error) {
 	link, err := c.Store.GetLink(shortCode)
 	if err != nil {
 		return "", err
@@ -202,9 +269,14 @@ func (c *Checker) CheckOne(ctx context.Context, shortCode string) (string, error
 		}
 	}
 	if notify && link.CreatorID != nil {
-		msg := "Link /" + shortCode + " tidak bisa dijangkau (tujuan: " + truncateURL(link.OriginalURL) + ")"
-		if _, err := c.Store.CreateNotification(*link.CreatorID, "link_broken", shortCode, msg); err != nil {
-			c.logf("Warning: notification for broken link %q failed: %v", shortCode, err)
+		// budget.take runs AFTER the marker write: within one batch the
+		// first NotifyCapPerUser first-breakages of a creator notify
+		// individually, the rest are folded into the aggregate flush.
+		if budget.take(*link.CreatorID) {
+			msg := "Link /" + shortCode + " tidak bisa dijangkau (tujuan: " + truncateURL(link.OriginalURL) + ")"
+			if _, err := c.Store.CreateNotification(*link.CreatorID, "link_broken", shortCode, msg); err != nil {
+				c.logf("Warning: notification for broken link %q failed: %v", shortCode, err)
+			}
 		}
 	}
 	return res.Status, nil
@@ -214,26 +286,33 @@ func (c *Checker) CheckOne(ctx context.Context, shortCode string) (string, error
 // (never-checked first, see ListLinksHealthDue) with spacing between probes.
 // A failing row is logged and skipped - one bad destination must never abort
 // the run. Returns how many checks completed.
+//
+// Anti-flood (2026-10-04): one notifyBudget is shared by the whole run, so
+// a creator gets at most NotifyCapPerUser individual link_broken rows plus
+// ONE health_aggregate row per batch (flush), whatever the batch finds.
 func (c *Checker) RunBatch(ctx context.Context) (int, error) {
 	links, err := c.Store.ListLinksHealthDue(BatchLimit)
 	if err != nil {
 		return 0, err
 	}
+	budget := newNotifyBudget()
 	done := 0
 	for i, l := range links {
 		if i > 0 {
 			select {
 			case <-ctx.Done():
+				budget.flush(c)
 				return done, ctx.Err()
 			case <-time.After(c.spacing()):
 			}
 		}
-		if _, err := c.CheckOne(ctx, l.ShortCode); err != nil {
+		if _, err := c.checkOne(ctx, l.ShortCode, budget); err != nil {
 			c.logf("health check %q failed: %v", l.ShortCode, err)
 			continue
 		}
 		done++
 	}
+	budget.flush(c)
 	return done, nil
 }
 

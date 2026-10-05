@@ -1,0 +1,4 @@
+# gofmt always writes LF; keep Go sources LF in the worktree regardless of
+# core.autocrlf on Windows, so `gofmt -l` stays clean and `git status` does
+# not flip-flop between EOL expectations.
+*.go text eol=lf

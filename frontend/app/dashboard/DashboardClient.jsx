@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Camera, ExternalLink, Download } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { DndContext, closestCenter } from "@dnd-kit/core";
@@ -31,8 +32,9 @@ import { useTranslation } from "../../lib/I18nProvider";
 
 // Draggable link row. attributes+listeners are attached to the grip handle
 // rather than the whole row so the QR/copy/edit buttons stay normally
-// tappable. dragDisabled=true while a tag filter is active (a partial
-// reorder would collide with the positions of hidden rows: see onDragEnd).
+// tappable. dragDisabled=true while a filter hides rows (tag or
+// ?filter=broken: a partial reorder would collide with the positions of
+// hidden rows: see onDragEnd).
 // The hover lift (Apple detail #4: y -4px + shadow 4px → 6px) uses the
 // .link-lift CSS utility (globals.css), NOT framer-motion and NOT Tailwind
 // hover:* utilities: dnd-kit owns this row's style.transform through inline
@@ -250,6 +252,17 @@ export default function DashboardClient() {
   const [keyErr, setKeyErr] = useState("");
   const [apiDocsOpen, setApiDocsOpen] = useState(false);
   const [theme, setTheme] = useState("classic");
+  // HEALTH FILTER (anti-flood, 2026-10-04): the bell's health_aggregate
+  // notification links to /dashboard?filter=broken; the param opens the
+  // Link Saya tab and narrows the list to broken links only (client-side,
+  // same style as tagFilter). useSearchParams needs a Suspense boundary -
+  // see page.jsx.
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const filterBroken = searchParams.get("filter") === "broken";
+  useEffect(() => {
+    if (filterBroken) setTab("links");
+  }, [filterBroken]);
   // THEME SCOPE (decision 2026-09-29): the dashboard does NOT follow the
   // creator's theme: body[data-profile-theme] is NOT applied here (only
   // ProfileLinks on /u/[username] may set it), so the dashboard always renders
@@ -283,6 +296,16 @@ export default function DashboardClient() {
       // The URL could not be read (sandboxed or old browser): the range still
       // works through state: the URL exists only for refresh/share purposes.
     }
+  }
+
+  // Drop ?filter=broken (chip ✕). router.replace, NOT replaceState: the
+  // dashboard must re-render through useSearchParams, and a same-segment
+  // replace keeps component state (no remount) while other params survive.
+  function clearHealthFilter() {
+    const sp = new URLSearchParams(window.location.search);
+    sp.delete("filter");
+    const qs = sp.toString();
+    router.replace(qs ? `/dashboard?${qs}` : "/dashboard");
   }
 
   useEffect(() => {
@@ -497,11 +520,15 @@ export default function DashboardClient() {
   // endpoint is warranted at this scale). Unique tags are derived from the
   // data, not from static configuration.
   const allTags = [...new Set(links.flatMap((l) => l.tags || []))].sort();
-  const visibleLinks = tagFilter === "" ? links : links.filter((l) => (l.tags || []).includes(tagFilter));
+  // Two independent client-side filters: ?filter=broken (health monitor)
+  // and the tag dropdown; both active = intersection.
+  const visibleLinks = links
+    .filter((l) => !filterBroken || l.health_status === "broken")
+    .filter((l) => tagFilter === "" || (l.tags || []).includes(tagFilter));
 
   async function onDragEnd(event) {
     const { active, over } = event;
-    if (tagFilter !== "" || !over || active.id === over.id) {
+    if (tagFilter !== "" || filterBroken || !over || active.id === over.id) {
       return;
     }
     const prev = links;
@@ -1154,6 +1181,19 @@ export default function DashboardClient() {
             </button>
           </div>
         </div>
+        {/* Health filter chip (bell aggregate entry): removable, sits above
+            the tag dropdown so the two filters never look like one control. */}
+        {filterBroken && (
+          <div className="mb-4 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={clearHealthFilter}
+              className="inline-flex items-center gap-1.5 rounded-full border-2 border-ink bg-flash-coral px-3 py-1.5 text-xs font-bold text-print-white transition-transform duration-150 hover:-translate-y-0.5 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-flash-yellow"
+            >
+              Hanya link rusak ✕
+            </button>
+          </div>
+        )}
         {allTags.length > 0 && (
           <div className="mb-4 flex items-center gap-2 text-sm">
             <label htmlFor="tag-filter" className={st.textMuted}>{t("dashboard.links.filter.label")}</label>
@@ -1173,7 +1213,9 @@ export default function DashboardClient() {
         {links.length === 0 ? (
           <p className={`text-sm ${st.textMuted}`}>{t("dashboard.emptyStates.noLinks")}</p>
         ) : visibleLinks.length === 0 ? (
-          <p className={`text-sm ${st.textMuted}`}>{t("dashboard.emptyStates.noTagMatch")}</p>
+          <p className={`text-sm ${st.textMuted}`}>
+            {filterBroken ? "Tidak ada link rusak saat ini." : t("dashboard.emptyStates.noTagMatch")}
+          </p>
         ) : (
           <DndContext collisionDetection={closestCenter} onDragEnd={onDragEnd}>
             <SortableContext items={visibleLinks.map((l) => l.short_code)} strategy={verticalListSortingStrategy}>
@@ -1186,7 +1228,7 @@ export default function DashboardClient() {
                     onEdit={() => setEditing(l)}
                     onFeature={() => toggleFeature(l)}
                     onToggleActive={() => toggleActive(l)}
-                    dragDisabled={tagFilter !== ""}
+                    dragDisabled={tagFilter !== "" || filterBroken}
                     st={st}
                   />
                 ))}

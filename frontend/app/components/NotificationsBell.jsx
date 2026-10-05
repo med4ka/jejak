@@ -12,6 +12,7 @@
 // health-monitor task, same policy as EditLinkModal/ShortenForm).
 // =====================================================================
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Bell } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { formatLocal } from "../../lib/expiry";
@@ -23,6 +24,7 @@ export default function NotificationsBell({ t, variant = "icon", triggerClassNam
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const wrapRef = useRef(null);
+  const router = useRouter();
 
   // Unread count on mount (cheap single-row query; failures stay silent:
   // the bell is decoration, never a blocker for navigation).
@@ -114,6 +116,17 @@ export default function NotificationsBell({ t, variant = "icon", triggerClassNam
     }
   }
 
+  async function onItem(n) {
+    await markRead(n);
+    // The batch's health_aggregate row ("Dan N link lainnya...") is the
+    // entry point into the broken-only dashboard view (health.go cap: a
+    // user gets at most 5 individual + 1 aggregate rows per batch).
+    if (n.type === "health_aggregate") {
+      setOpen(false);
+      router.push("/dashboard?filter=broken");
+    }
+  }
+
   const isDrawer = variant === "drawer";
   const trigger =
     variant === "icon"
@@ -179,7 +192,7 @@ export default function NotificationsBell({ t, variant = "icon", triggerClassNam
                   <li key={n.id}>
                     <button
                       type="button"
-                      onClick={() => markRead(n)}
+                      onClick={() => onItem(n)}
                       className={`flex w-full items-start gap-2 rounded-lg px-2 py-2 text-left text-sm transition-colors duration-150 ${t.panelHover ?? "hover:bg-black/5"} ${
                         n.read ? t.textMuted ?? "text-muted" : `${t.text ?? "text-ink"} font-semibold`
                       }`}
@@ -193,7 +206,7 @@ export default function NotificationsBell({ t, variant = "icon", triggerClassNam
                       <span className="min-w-0">
                         <span className="block break-words">{n.message}</span>
                         <span className={`mt-0.5 block font-mono text-[10px] ${t.textMuted ?? "text-muted"}`}>
-                          /{n.short_code} · {formatLocal(n.created_at)}
+                          {n.short_code ? `/${n.short_code} · ${formatLocal(n.created_at)}` : formatLocal(n.created_at)}
                         </span>
                       </span>
                     </button>
