@@ -11,6 +11,15 @@ Append-only log. Jangan hapus entry lama.
 
 ---
 
+## 2026-10-05: Verify build + setup GitHub remote
+**Status:** Sebagian (semua build/test hijau + commit lokal bersih; `remote`+`push` menunggu user — user push sendiri setelah kirim URL)
+- **Fix crash blocking:** i18n NotificationsBell memanggil `t("notifications…")` padahal prop `t` dari NavbarClient = theme object → `TypeError: t is not a function`, `GET /` + `GET /dashboard` 500. Fix: `useTranslation()` internal sebagai `tr` untuk strings, prop `t` tetap theme tokens (`NotificationsBell.jsx:19-27`). Commit `04f40a2`.
+- **E2E bell lengkap (CDP `%TEMP%\opencode\cdp-bell-click.ps1`, shots 8/9/10):** badge `6` (aria `Notifikasi (6 belum dibaca)`), klik aggregate → `NAV=/dashboard?filter=broken`, chip `Hanya link rusak ✕` muncul, **7 baris broken tampil, 0 healthy** (`HEALTHY-ROW-VISIBLE=False`, `BROKEN-ROWS=7`).
+- **Clean build frontend:** dev server dimatikan (`:3000` owner di-kill), `rm .next`, `npm run build` **exit 0, 0 error, 41 routes** (35 static-generated).
+- **Backend:** `gofmt` bersih, `go build ./...` + `go vet ./...` OK, `go test ./... -count=1` semua `ok`, smoke `go run ./cmd/smoketest` (BASE_URL=8082) **12/12 passed**.
+- **Git:** `git remote -v` kosong; `user.name=Medaka356`; `.gitignore` OK (`.env`, `*.exe`, `*.log`, `/bin/`, `uploads/`); `git ls-files` sensitif: hanya `backend/uploads/avatars/.gitkeep` — **`.env` TIDAK ke-track, aman, tidak ada yang perlu di-rotate**. `gh` CLI tidak tersedia → repo dibuat manual via web sesuai instruksi.
+- **TODO (user):** `git remote add origin https://github.com/USERNAME/jejak.git` lalu `git push -u origin master`; verifikasi di GitHub tidak ada `.env`/secret.
+
 ## 2026-10-05: i18n fitur baru (health + password + deeplink + notifikasi + WhatsApp tools)
 **Status:** Done
 - Extract semua string literal Indonesia dari komponen fitur baru ke `messages/{id,en,de}.json` (3 bahasa penuh,+ wire `t()`/`tr()`).
