@@ -11,6 +11,10 @@ Append-only log. Jangan hapus entry lama.
 
 ---
 
+## 2026-10-05: Screenshot password form 3 bahasa
+**Status:** Done
+- Bukti visual Task 1 (form `/r/HUYEjW` via headless Chrome `--accept-lang`, profile terpisah per locale — 1 profile bersama bikin proses hang berebut lock): `%TEMP%\opencode\jejak-pw-shots\pw-form-{id,en,de}.png` (1280×900, ketiganya dicek visual: ID "Link ini dilindungi password / Buka link", EN "This link is password-protected / Open link", DE "Dieser Link ist passwortgeschützt / Link öffnen", styling neo-brutal utuh).
+
 ## 2026-10-05: i18n backend (password form + error code)
 **Status:** Done
 - **Task 1 — password form (server-rendered) diterjemahkan:** paket baru `backend/internal/i18n/` (`DetectLocale` parse Accept-Language + q-weight, `Translate` dot-path + fallback id→key, locale `locales/{id,en,de}.json` via go:embed — hanya 7 key yg dirender server; go:embed tak bisa keluar modul jadi bukan seluruh dict). `writePasswordForm(w, r, code, errKind)` render `<html lang>` + title/h1/p/label/button + error `wrong`/`rate_limited` per locale; `passwordErrorFromQuery` kini kembalikan kind. Test: `TestPasswordFormLocales` + `TestParityWithFrontend` (cocokkan 7 key vs `frontend/messages/*.json` — drift gagalkan build).
