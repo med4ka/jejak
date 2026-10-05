@@ -628,8 +628,9 @@ export default function NavbarClient({ isLoggedIn }) {
                         setNotifOpen(true);
                       }}
                     />
+                    <div className={drawerDividerWideCls} />
                     <DrawerLanguage locale={locale} />
-                    <div className={drawerDividerCls} />
+                    <div className={drawerDividerWideCls} />
                     <DrawerRow icon={LogOut} label={tr("nav.account.logout")} onClick={logout} danger />
                   </>
                 ) : (

@@ -11,6 +11,12 @@ Append-only log. Jangan hapus entry lama.
 
 ---
 
+## 2026-10-05: Fix landing text wrap + konsistenkan language pill drawer
+**Status:** Done (tanpa screenshot, sesuai instruksi — verifikasi manual oleh user)
+- **Sub-headline hero (Option A):** `landing.hero.subheadline` dipecah jadi 2 kalimat, titik ganti titik-dua yang menggantung (render tetap 1 `<p> max-w-xl`, tanpa ubah layout): ID "…bisa dibagikan. Dilengkapi smart redirect per device dan analytics lengkap.", EN "…shareable page. Featuring smart per-device redirect and full analytics.", DE "…teilbaren Seite. Mit intelligenter Weiterleitung pro Gerät und umfassenden Analysen." — hanya dipakai `app/page.jsx`.
+- **Pill konsisten:** drawer logged-in kini pill terisolasi blok sendiri (divider my-6 atas + bawah, sama persis logged-out): Link Baru → ── → Dashboard → Notifikasi → ━━ → [pill] → ━━ → Keluar. Dropdown in-flow tak berubah (mendorong konten, anti-overlap).
+- Build exit 0, smoke **12/12**.
+
 ## 2026-10-05: Drawer polish (language pill + remove Profil) + title simplification
 **Status:** Done
 - **Bahasa kembali ke pill + dropdown** (`DrawerLanguage` di `NavbarClient.jsx`): pill `border-2 rounded-full px-3 py-1.5` (icon 14px + short + chevron), menu in-flow `rounded-12px border-2 shadow keras` (ID/EN/DE + check aktif kuning). In-flow dipilih ganti absolute+mb-16: menu asli ~136px > 64px sehingga absolute tetap overlap; in-flow mendorong konten (terbukti Masuk 371→507, Keluar 327→463) dan aman di 320px.
