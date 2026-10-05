@@ -217,7 +217,8 @@
       },
       "filter": {
         "label": "Filter tag:",
-        "allOption": "Semua"
+        "allOption": "Semua",
+        "brokenOnly": "Hanya link rusak"
       },
       "row": {
         "dragDisabledTitle": "Reset filter untuk mengurutkan",
@@ -308,7 +309,8 @@
       "noKeys": "Belum ada key: buat satu lewat formulir di atas.",
       "noTopLinks": "Belum ada link: buat dulu di tab Link Saya.",
       "noClicks30d": "Belum ada klik 30 hari terakhir.",
-      "noClicksInRange": "Belum ada klik di rentang ini."
+      "noClicksInRange": "Belum ada klik di rentang ini.",
+      "noBroken": "Tidak ada link rusak saat ini."
     },
     "settings": {
       "profile": {
@@ -637,5 +639,90 @@
   "metadata": {
     "title": "Jejak: Satu link, semua konten kamu",
     "description": "Satu halaman untuk semua link kreator, lengkap dengan click analytics."
+  },
+  "tools": {
+    "whatsapp": {
+      "badge": "Tool WhatsApp",
+      "metadataTitle": "Generator Link WhatsApp: Jejak",
+      "metadataDescription": "Buat link WhatsApp click-to-chat (wa.me) dengan pesan prefilled, lalu short link gratis agar kliknya tercatat di analytics.",
+      "heading": "Link WhatsApp Click-to-Chat",
+      "descriptionPart1": "Masukkan nomor + pesan, dapatkan link",
+      "waMe": "wa.me",
+      "descriptionPart2": "yang langsung membuka chat dengan pesan sudah terisi. Cocok untuk UMKM, jualan, dan CS. Link singkatnya otomatis tercatat analytics Jejak (device, referrer).",
+      "phoneLabel": "Nomor WhatsApp",
+      "phonePlaceholder": "08123456789, +628123456789, atau 628123456789",
+      "phoneHint": "Format Indonesia otomatis dinormalisasi ke 62…",
+      "messageLabel": "Pesan (opsional)",
+      "messagePlaceholder": "Halo, saya mau tanya tentang produk XYZ…",
+      "previewTitle": "Preview chat",
+      "previewEmpty": "Pesan Anda tampil di sini…",
+      "previewTime": "sekarang ✓✓",
+      "shortenCheckbox": "Shorten link ini (default: aktif, agar tercatat di analytics)",
+      "loadingLabel": "Membuat link…",
+      "submitLabel": "Buat Link WhatsApp",
+      "resultTitle": "Link Anda",
+      "copyLink": "Salin link",
+      "originalWaLink": "WhatsApp asli: {link}",
+      "addedToBio": "✓ Sudah di bio",
+      "addingBio": "Menambahkan…",
+      "addToBio": "Tambah ke Bio",
+      "openHint": "Klik dibuka di WhatsApp (HP) atau WhatsApp Web (desktop).",
+      "errorDefault": "Gagal membuat link WhatsApp",
+      "bioErrorDefault": "Gagal menambahkan ke bio"
+    }
+  },
+  "link": {
+    "health": {
+      "labels": {
+        "healthy": "sehat ✓",
+        "broken": "rusak",
+        "timeout": "timeout",
+        "unknown": "belum dicek"
+      },
+      "badgePrefix": "Kesehatan: ",
+      "checkButton": "Cek sekarang",
+      "checkingLabel": "Mengecek…",
+      "resultPrefix": "Hasil cek: {label}",
+      "deeplinkActive": "Deep link: aktif — buka {name} di HP",
+      "deeplinkInactive": "Deep link: mati — redirect biasa ke web",
+      "mainUrlLabel": "URL utama: {originalUrl}",
+      "fallbackLabel": "Fallback URL (opsional)",
+      "fallbackHint": "Kalau link utama rusak, user akan diarahkan ke URL ini.",
+      "saveFailed": "Gagal menyimpan",
+      "checkFailed": "Gagal mengecek",
+      "dashboardBadgeBroken": "Broken",
+      "dashboardBadgeTimeout": "Timeout"
+    },
+    "password": {
+      "shortenLabel": "Password link (opsional)",
+      "shortenPlaceholder": "Password link (opsional, 4-72 karakter)",
+      "editExistingActive": "Password (aktif)",
+      "editExistingWillRemove": "Password (aktif — akan dihapus)",
+      "editExistingPlaceholderClear": "Dihapus saat disimpan",
+      "editExistingPlaceholderKeep": "Kosongkan untuk tetap, isi untuk ganti",
+      "editNewLabel": "Password baru (opsional)",
+      "editNewPlaceholder": "4-72 karakter",
+      "removeButton": "Hapus password",
+      "removeWarning": "Password akan dihapus saat disimpan.",
+      "cancelButton": "Batal",
+      "errorLength": "Password harus 4-72 karakter.",
+      "errorInvalid": "Password tidak valid.",
+      "errorProtocol": "Fallback URL harus http:// atau https://",
+      "dashboardBadge": "Dilindungi password"
+    }
+  },
+  "notifications": {
+    "title": "Notifikasi",
+    "reload": "Muat ulang",
+    "loading": "Memuat…",
+    "empty": "Belum ada notifikasi.",
+    "unreadAria": "Belum dibaca",
+    "ariaWithCount": "Notifikasi ({count} belum dibaca)",
+    "drawerLabel": "Notifikasi{count}"
+  },
+  "deeplink": {
+    "badge": {
+      "detected": "{name} terdeteksi — link akan buka app di HP"
+    }
   }
 }

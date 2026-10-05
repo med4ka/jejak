@@ -6,17 +6,17 @@ import SubmitButton from "./SubmitButton";
 import { SPRING } from "../../lib/animations";
 import { formatLocal, fromInputValue, minuteKey, toInputValue } from "../../lib/expiry";
 import { detectEcommerce } from "../../lib/deeplink";
+import { useTranslation } from "../../lib/I18nProvider";
 
 const input =
   "w-full rounded-xl border-2 border-ink bg-print-white px-3 py-2 text-sm text-ink placeholder:text-muted focus:border-flash-yellow focus:ring-2 focus:ring-flash-yellow/30 focus:outline-hidden transition-all duration-150";
 
-// Verdict labels for the health status (hard-coded Indonesian, same policy
-// as the other new copy in this task: the i18n dictionaries are off-limits).
-function healthLabel(status) {
-  if (status === "healthy") return "sehat ✓";
-  if (status === "broken") return "rusak";
-  if (status === "timeout") return "timeout";
-  return "belum dicek";
+// Verdict labels for the health status.
+function healthLabel(t, status) {
+  if (status === "healthy") return t("link.health.labels.healthy");
+  if (status === "broken") return t("link.health.labels.broken");
+  if (status === "timeout") return t("link.health.labels.timeout");
+  return t("link.health.labels.unknown");
 }
 
 // Edit link modal (Smart Link): set per-device destination URLs (iOS/Android)
@@ -26,6 +26,7 @@ function healthLabel(status) {
 // panel fade/scale driven by SPRING (UI state → spring, Apple-style detail
 // #1), Escape closes.
 export default function EditLinkModal({ link, onClose, onSaved, st }) {
+  const { t } = useTranslation();
   const [iosUrl, setIosUrl] = useState("");
   const [androidUrl, setAndroidUrl] = useState("");
   const [tagInput, setTagInput] = useState("");
@@ -109,7 +110,7 @@ export default function EditLinkModal({ link, onClose, onSaved, st }) {
         body.password = "";
       } else if (password !== "") {
         if (password.length < 4 || password.length > 72) {
-          throw new Error("Password harus 4-72 karakter.");
+          throw new Error(t("link.password.errorLength"));
         }
         body.password = password;
       }
@@ -121,10 +122,10 @@ export default function EditLinkModal({ link, onClose, onSaved, st }) {
           try {
             parsed = new URL(nextFallback);
           } catch {
-            throw new Error("Fallback URL tidak valid.");
+            throw new Error(t("link.password.errorInvalid"));
           }
           if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-            throw new Error("Fallback URL harus http:// atau https://");
+            throw new Error(t("link.password.errorProtocol"));
           }
         }
         body.fallback_url = nextFallback;
@@ -140,10 +141,10 @@ export default function EditLinkModal({ link, onClose, onSaved, st }) {
       try {
         data = JSON.parse(text);
       } catch {
-        throw new Error(text || "Gagal menyimpan");
+        throw new Error(text || t("link.health.saveFailed"));
       }
       if (!res.ok) {
-        throw new Error(data.error || text || "Gagal menyimpan");
+        throw new Error(data.error || text || t("link.health.saveFailed"));
       }
       onSaved();
       onClose();
@@ -172,14 +173,14 @@ export default function EditLinkModal({ link, onClose, onSaved, st }) {
       try {
         data = JSON.parse(text);
       } catch {
-        throw new Error(text || "Gagal mengecek");
+        throw new Error(text || t("link.health.checkFailed"));
       }
       if (!res.ok) {
-        throw new Error(data.error || text || "Gagal mengecek");
+        throw new Error(data.error || text || t("link.health.checkFailed"));
       }
       const status = data.health_status || "unknown";
       setHealthStatus(status);
-      setHealthMsg(`Hasil cek: ${healthLabel(status)}`);
+      setHealthMsg(t("link.health.resultPrefix", { label: healthLabel(t, status)}));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -201,7 +202,7 @@ export default function EditLinkModal({ link, onClose, onSaved, st }) {
       <motion.div
         role="dialog"
         aria-modal="true"
-        aria-label={`Edit link /${link.short_code}`}
+        aria-label={t("forms.editLink.dialogAriaLabel", { shortCode: link.short_code })}
         initial={{ opacity: 0, y: 24, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 12, scale: 0.98 }}
@@ -209,7 +210,7 @@ export default function EditLinkModal({ link, onClose, onSaved, st }) {
         className="pointer-events-auto relative w-full rounded-t-2xl border-2 border-ink bg-print-white p-6 text-ink sm:max-w-[440px] sm:rounded-2xl"
       >
         <p className="font-mono text-sm font-bold">/{link.short_code}</p>
-        <p className="mt-1 text-sm text-muted">URL utama: {link.original_url}</p>
+        <p className="mt-1 text-sm text-muted">{t("forms.editLink.mainUrlLabel", { originalUrl: link.original_url })}</p>
 
         {/* Deep link status (read-only display, deep link feature): aktif =
             the destination is a supported e-commerce URL (the redirect
@@ -220,10 +221,10 @@ export default function EditLinkModal({ link, onClose, onSaved, st }) {
           const d = detectEcommerce(link.original_url);
           return d ? (
             <p className="mt-2 inline-block rounded-full border-2 border-ink bg-flash-yellow px-3 py-1 text-xs font-bold text-ink">
-              🛍️ Deep link: aktif — buka {d.name} di HP
+              🛍️ {t("link.health.deeplinkActive", { name: d.name })}
             </p>
           ) : (
-            <p className="mt-2 text-xs text-muted">Deep link: mati — redirect biasa ke web</p>
+            <p className="mt-2 text-xs text-muted">{t("link.health.deeplinkInactive")}</p>
           );
         })()}
 
@@ -242,7 +243,7 @@ export default function EditLinkModal({ link, onClose, onSaved, st }) {
                     : "bg-paper-grey text-muted"
             }`}
           >
-            Kesehatan: {healthLabel(healthStatus)}
+            {t("link.health.badgePrefix")}{healthLabel(t, healthStatus)}
           </span>
           <button
             type="button"
@@ -250,14 +251,14 @@ export default function EditLinkModal({ link, onClose, onSaved, st }) {
             disabled={checking}
             className="rounded-full border-2 border-ink bg-print-white px-3 py-1 text-xs font-bold text-ink transition-opacity duration-150 hover:opacity-80 disabled:opacity-50"
           >
-            {checking ? "Mengecek..." : "Cek sekarang"}
+            {checking ? t("link.health.checkingLabel") : t("link.health.checkButton")}
           </button>
         </div>
         {healthMsg !== "" && <p className="mt-1 text-xs text-muted">{healthMsg}</p>}
 
         <form onSubmit={onSubmit} className="mt-4 flex flex-col gap-3">
           <label className="text-sm font-medium">
-            URL untuk iOS (opsional)
+            {t("forms.editLink.iosLabel")}
             <input
               value={iosUrl}
               onChange={(e) => setIosUrl(e.target.value)}
@@ -266,7 +267,7 @@ export default function EditLinkModal({ link, onClose, onSaved, st }) {
             />
           </label>
           <label className="text-sm font-medium">
-            URL untuk Android (opsional)
+            {t("forms.editLink.androidLabel")}
             <input
               value={androidUrl}
               onChange={(e) => setAndroidUrl(e.target.value)}
@@ -275,7 +276,7 @@ export default function EditLinkModal({ link, onClose, onSaved, st }) {
             />
           </label>
           <label className="text-sm font-medium">
-            Tag (koma, maks 5)
+            {t("forms.editLink.tagLabel")}
             <input
               value={tagInput}
               onChange={(e) => setTagInput(e.target.value)}
@@ -288,7 +289,7 @@ export default function EditLinkModal({ link, onClose, onSaved, st }) {
               field means "keep", never "remove". */}
           {link.has_password ? (
             <label className="text-sm font-medium">
-              Password {clearPassword ? "(aktif — akan dihapus)" : "(aktif)"}
+              {clearPassword ? t("link.password.editExistingWillRemove") : t("link.password.editExistingActive")}
               <input
                 type="password"
                 autoComplete="new-password"
@@ -297,13 +298,15 @@ export default function EditLinkModal({ link, onClose, onSaved, st }) {
                 disabled={clearPassword}
                 minLength={4}
                 maxLength={72}
-                placeholder={clearPassword ? "Dihapus saat disimpan" : "Kosongkan untuk tetap, isi untuk ganti"}
+                placeholder={clearPassword
+                  ? t("link.password.editExistingPlaceholderClear")
+                  : t("link.password.editExistingPlaceholderKeep")}
                 className={`${input} mt-1`}
               />
             </label>
           ) : (
             <label className="text-sm font-medium">
-              Password baru (opsional)
+              {t("link.password.editNewLabel")}
               <input
                 type="password"
                 autoComplete="new-password"
@@ -311,7 +314,7 @@ export default function EditLinkModal({ link, onClose, onSaved, st }) {
                 onChange={(e) => setPassword(e.target.value)}
                 minLength={4}
                 maxLength={72}
-                placeholder="4-72 karakter"
+                placeholder={t("link.password.editNewPlaceholder")}
                 className={`${input} mt-1`}
               />
             </label>
@@ -323,18 +326,18 @@ export default function EditLinkModal({ link, onClose, onSaved, st }) {
                 onClick={() => setClearPassword(true)}
                 className="rounded-full border-2 border-ink bg-print-white px-3 py-1 font-bold text-ink transition-opacity duration-150 hover:opacity-80"
               >
-                Hapus password
+{t("link.password.removeButton")}
               </button>
             )}
             {clearPassword && (
               <>
-                <span className="font-medium text-ink">Password akan dihapus saat disimpan.</span>
+                <span className="font-medium text-ink">{t("link.password.removeWarning")}</span>
                 <button
                   type="button"
                   onClick={() => setClearPassword(false)}
                   className="rounded-full border-2 border-ink bg-print-white px-3 py-1 font-bold text-ink transition-opacity duration-150 hover:opacity-80"
                 >
-                  Batal
+                  {t("common.cancel")}
                 </button>
               </>
             )}
@@ -344,7 +347,7 @@ export default function EditLinkModal({ link, onClose, onSaved, st }) {
               saving the other fields; the 422 validation applies only when the
               value CHANGES. */}
           <label className="text-sm font-medium">
-            Aktif sampai (opsional)
+            {t("forms.editLink.expiryLabel")}
             <span className="relative mt-1 block">
               <input
                 type="datetime-local"
@@ -356,8 +359,8 @@ export default function EditLinkModal({ link, onClose, onSaved, st }) {
                 <button
                   type="button"
                   onClick={() => setExpiresInput("")}
-                  aria-label="Hapus batas waktu"
-                  title="Hapus batas waktu (aktif selamanya)"
+                  aria-label={t("common.clearExpiry")}
+                  title={t("forms.editLink.clearExpiryTitle")}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-sm text-muted transition-colors duration-150 hover:text-ink"
                 >
                   ✕
@@ -366,15 +369,15 @@ export default function EditLinkModal({ link, onClose, onSaved, st }) {
             </span>
             <span className="mt-1 block text-xs font-normal text-muted">
               {link.expires_at
-                ? `Sekarang: ${formatLocal(link.expires_at)}`
-                : "Tanpa batas waktu: biarkan kosong untuk tetap aktif."}
+                ? t("forms.editLink.expiryCurrent", { formattedDate: formatLocal(link.expires_at) })
+                : t("forms.editLink.noExpiryHint")}
             </span>
           </label>
           {/* Fallback URL (health monitor): destination used by the broken-
               link interstitial when the primary URL is down. Sent only when
               it changed; empty = no fallback (visitor gets a 503 instead). */}
           <label className="text-sm font-medium">
-            Fallback URL (opsional)
+            {t("link.health.fallbackLabel")}
             <input
               type="url"
               value={fallbackUrl}
@@ -383,16 +386,16 @@ export default function EditLinkModal({ link, onClose, onSaved, st }) {
               className={`${input} mt-1`}
             />
             <span className="mt-1 block text-xs font-normal text-muted">
-              Kalau link utama rusak, user akan diarahkan ke URL ini.
+              {t("link.health.fallbackHint")}
             </span>
           </label>
 
           <SubmitButton
             isLoading={loading}
-            loadingLabel="Menyimpan..."
+            loadingLabel={t("common.saving")}
             className={`rounded-full border-2 border-ink ${st.accent} px-4 py-2.5 text-sm font-bold transition-[filter] duration-150 hover:brightness-95`}
           >
-            Simpan
+            {t("common.save")}
           </SubmitButton>
         </form>
 

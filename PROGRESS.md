@@ -11,6 +11,16 @@ Append-only log. Jangan hapus entry lama.
 
 ---
 
+## 2026-10-05: i18n fitur baru (health + password + deeplink + notifikasi + WhatsApp tools)
+**Status:** Done
+- Extract semua string literal Indonesia dari komponen fitur baru ke `messages/{id,en,de}.json` (3 bahasa penuh,+ wire `t()`/`tr()`).
+- **File disentuh:** `WhatsAppTool.jsx`, `tools/whatsapp/page.jsx`, `ShortenForm.jsx`, `EditLinkModal.jsx`, `NotificationsBell.jsx`, `DashboardClient.jsx` + 3 dictionary.
+- **Key baru (top-level `tools/link/notifications/deeplink`):** `tools.whatsapp.*` (builder: form/preview/result/bio/metadata), `link.health.*` (label sehat/rusak/timeout/belum dicek, badge, check button/result, deeplink aktif/mati, fallback, dashboard badge broken/timeout), `link.password.*` (shorten field, edit modal existing/new/remove, error length/invalid/protocol, dashboard badge "Dilindungi password"), `notifications.*` (title/reload/loading/empty/unread aria/count drawer), `deeplink.badge.detected`, `dashboard.links.filter.brokenOnly` + `dashboard.emptyStates.noBroken`.
+- `tools/whatsapp/page.jsx`: `metadata` statis → **`generateMetadata`** (via `getServerTranslation`),mengikuti cookie locale seperti layout.
+- `WhatsAppTool`/`EditLinkModal`/`DashboardClient(healthBadge)`: tambah `useTranslation`; module-level `healthLabel`/`healthBadge` terima `t` sebagai argumen.
+- **Verifikasi:** `node JSON.parse` 3 dictionary OK; `npm run build` **exit 0** (`.next` 710 file fresh clean build;; scan 6 file target: **0 literal UI Indonesia tersisa** (sisa match cuma komentar/orang enum `"timeout"`/`"broken"` status constants).
+- Catatan: entry lama deviasi "(5) Teks UI hardcode" telah usang untuk fitur-fitur di atas — teks kini i18n,+ deviasi "(7) Badge Broken/Timeout literal" ikut teri18n. Sisa TODO (line 22): error Go API translate + metadata per-file (selain tools/whatsapp) tetap terbuka.
+
 ## 2026-10-05: Commit + fix notifikasi flooding
 **Status:** Done
 - Merged branch upgrade/next16-tailwind4 (already merged via fast-forward)

@@ -116,8 +116,6 @@ export default function ShortenForm({ st, onSuccess }) {
 
   // Instant e-commerce verdict while typing (deep link feature): shows the
   // platform badge the moment a Shopee/Tokopedia/... URL lands in the field.
-  // Copy is intentionally hard-coded Indonesian (like EditLinkModal): the
-  // i18n dictionaries were off-limits for this task.
   const detected = detectEcommerce(url);
 
   return (
@@ -184,8 +182,8 @@ export default function ShortenForm({ st, onSuccess }) {
             form before the redirect. Omitted when empty; 4-72 chars. */}
         <input
           type="password"
-          aria-label="Password link (opsional)"
-          placeholder="Password link (opsional, 4-72 karakter)"
+          aria-label={t("link.password.shortenLabel")}
+          placeholder={t("link.password.shortenPlaceholder")}
           autoComplete="new-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
@@ -206,7 +204,7 @@ export default function ShortenForm({ st, onSuccess }) {
           role="status"
           className={`${st.radius} ${st.borderW} ${st.border} ${st.accent} px-4 py-2.5 text-sm font-bold`}
         >
-          🛍️ {detected.name} terdeteksi — link akan buka app di HP
+          🛍️ {t("deeplink.badge.detected", { name: detected.name })}
         </div>
       )}
 

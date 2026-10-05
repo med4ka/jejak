@@ -217,7 +217,8 @@
       },
       "filter": {
         "label": "Tag-Filter:",
-        "allOption": "Alle"
+        "allOption": "Alle",
+        "brokenOnly": "Nur defekte Links"
       },
       "row": {
         "dragDisabledTitle": "Setze den Filter zurück, um zu sortieren",
@@ -308,7 +309,8 @@
       "noKeys": "Noch keine Schlüssel: erstelle einen über das Formular oben.",
       "noTopLinks": "Noch keine Links: erstelle zuerst einen im Tab Meine Links.",
       "noClicks30d": "Noch keine Klicks in den letzten 30 Tagen.",
-      "noClicksInRange": "Noch keine Klicks in diesem Zeitraum."
+      "noClicksInRange": "Noch keine Klicks in diesem Zeitraum.",
+      "noBroken": "Momentan keine defekten Links."
     },
     "settings": {
       "profile": {
@@ -637,5 +639,90 @@
   "metadata": {
     "title": "Jejak: Ein Link, alle deine Inhalte",
     "description": "Eine Seite für alle deine Creator-Links, inklusive Click-Analytics."
+  },
+  "tools": {
+    "whatsapp": {
+      "badge": "WhatsApp-Tool",
+      "metadataTitle": "WhatsApp-Link-Generator: Jejak",
+      "metadataDescription": "Erstelle einen WhatsApp-Click-to-Chat-Link(wa.me) mit vorausgefüllter Nachricht und kürze ihn dann kostenlos, damit Klicks in den Analysen erfasst werden.",
+      "heading": "WhatsApp Click-to-Chat-Link",
+      "descriptionPart1": "Gib eine Nummer + Nachricht ein, erhalte einen Link",
+      "waMe": "wa.me",
+      "descriptionPart2": "der einen Chat mit vorgefüllter Nachricht öffnet. Ideal für KMU, Verkäufe und Kundensupport. Der gekürzte Link wird in den Jejak-Analysen (Gerät, Verweisquelle) verfolgt.",
+      "phoneLabel": "WhatsApp-Nummer",
+      "phonePlaceholder": "08123456789, +628123456789, oder 628123456789",
+      "phoneHint": "Indonesische Formate werden automatisch auf 62… normalisiert.",
+      "messageLabel": "Nachricht (optional)",
+      "messagePlaceholder": "Hallo, ich hätte gerne etwas zu Produkt XYZ gefragt…",
+      "previewTitle": "Chat-Vorschau",
+      "previewEmpty": "Deine Nachricht wird hier angezeigt…",
+      "previewTime": "jetzt ✓✓",
+      "shortenCheckbox": "Diesen Link kürzen (Standard: aktiviert, damit er in den Analysen erfasst wird)",
+      "loadingLabel": "Link wird erstellt…",
+      "submitLabel": "WhatsApp-Link erstellen",
+      "resultTitle": "Dein Link",
+      "copyLink": "Link kopieren",
+      "originalWaLink": "Originaler WhatsApp-Link: {link}",
+      "addedToBio": "✓ In Bio hinzugefügt",
+      "addingBio": "Wird hinzugefügt…",
+      "addToBio": "Zur Bio hinzufügen",
+      "openHint": "Tippe zum Öffnen in WhatsApp (Mobil) oder WhatsApp Web (Desktop).",
+      "errorDefault": "Fehler beim Erstellen des WhatsApp-Links",
+      "bioErrorDefault": "Fehler beim Hinzufügen zur Bio"
+    }
+  },
+  "link": {
+    "health": {
+      "labels": {
+        "healthy": "gesund ✓",
+        "broken": "defekt",
+        "timeout": "Timeout",
+        "unknown": "noch nicht geprüft"
+      },
+      "badgePrefix": "Gesundheit: ",
+      "checkButton": "Jetzt prüfen",
+      "checkingLabel": "Wird geprüft…",
+      "resultPrefix": "Prüfergebnis: {label}",
+      "deeplinkActive": "Deep Link: aktiv — öffnet {name} auf Mobilgerät",
+      "deeplinkInactive": "Deep Link: inaktiv — normale Web-Weiterleitung",
+      "mainUrlLabel": "Haupt-URL: {originalUrl}",
+      "fallbackLabel": "Fallback-URL (optional)",
+      "fallbackHint": "Falls der Haupt-Link defekt ist, wird der Nutzer auf diese URL weitergeleitet.",
+      "saveFailed": "Speichern fehlgeschlagen",
+      "checkFailed": "Prüfen fehlgeschlagen",
+      "dashboardBadgeBroken": "Defekt",
+      "dashboardBadgeTimeout": "Timeout"
+    },
+    "password": {
+      "shortenLabel": "Link-Passwort (optional)",
+      "shortenPlaceholder": "Link-Passwort (optional, 4-72 Zeichen)",
+      "editExistingActive": "Passwort (aktiv)",
+      "editExistingWillRemove": "Passwort (aktiv — wird entfernt)",
+      "editExistingPlaceholderClear": "Beim Speichern gelöscht",
+      "editExistingPlaceholderKeep": "Leer lassen zum Beibehalten, ausfüllen zum Ändern",
+      "editNewLabel": "Neues Passwort (optional)",
+      "editNewPlaceholder": "4-72 Zeichen",
+      "removeButton": "Passwort entfernen",
+      "removeWarning": "Passwort wird beim Speichern entfernt.",
+      "cancelButton": "Abbrechen",
+      "errorLength": "Passwort muss 4-72 Zeichen lang sein.",
+      "errorInvalid": "Ungültiges Passwort.",
+      "errorProtocol": "Fallback-URL muss mit http:// oder https:// beginnen",
+      "dashboardBadge": "Passwortgeschützt"
+    }
+  },
+  "notifications": {
+    "title": "Benachrichtigungen",
+    "reload": "Neu laden",
+    "loading": "Wird geladen…",
+    "empty": "Noch keine Benachrichtigungen.",
+    "unreadAria": "Ungelesen",
+    "ariaWithCount": "Benachrichtigungen ({count} ungelesen)",
+    "drawerLabel": "Benachrichtigungen{count}"
+  },
+  "deeplink": {
+    "badge": {
+      "detected": "{name} erkannt — Link öffnet die App auf Mobilgerät"
+    }
   }
 }

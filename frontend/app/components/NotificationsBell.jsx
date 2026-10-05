@@ -8,8 +8,9 @@
 // Two placements share this component:
 //   - variant "icon"   : round bell button, absolute dropdown (desktop nav)
 //   - variant "drawer" : full-width row button, in-flow panel (mobile)
-// Copy is hard-coded Indonesian (i18n dictionaries off-limits for the
-// health-monitor task, same policy as EditLinkModal/ShortenForm).
+// Copy comes from messages/*.json via useTranslation (tr); the `t` prop
+// carries THEME TOKENS (t.panel, t.textMuted, ...) from NavbarClient, where
+// `t` is the theme object and the translator is aliased `tr`.
 // =====================================================================
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -17,8 +18,10 @@ import { Bell } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { formatLocal } from "../../lib/expiry";
 import { EASE } from "../../lib/animations";
+import { useTranslation } from "../../lib/I18nProvider";
 
 export default function NotificationsBell({ t, variant = "icon", triggerClassName = "" }) {
+  const { t: tr } = useTranslation();
   const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
@@ -144,7 +147,7 @@ export default function NotificationsBell({ t, variant = "icon", triggerClassNam
         onClick={toggle}
         aria-expanded={open}
         aria-haspopup="true"
-        aria-label={`Notifikasi${unread > 0 ? ` (${unread} belum dibaca)` : ""}`}
+        aria-label={unread > 0 ? tr("notifications.ariaWithCount", { count: unread }) : tr("notifications.title")}
         className={trigger}
       >
         <Bell className="h-5 w-5" strokeWidth={2.5} aria-hidden="true" />
@@ -157,7 +160,7 @@ export default function NotificationsBell({ t, variant = "icon", triggerClassNam
             {unread > 9 ? "9+" : unread}
           </span>
         )}
-        {isDrawer && <span>Notifikasi{unread > 0 ? ` (${unread})` : ""}</span>}
+        {isDrawer && <span>{tr("notifications.drawerLabel", { count: unread > 0 ? ` (${unread})` : "" })}</span>}
       </button>
 
       <AnimatePresence>
@@ -171,21 +174,21 @@ export default function NotificationsBell({ t, variant = "icon", triggerClassNam
           >
             <div className="flex items-center justify-between px-2 py-1">
               <span className={`text-xs font-bold uppercase tracking-widest ${t.textMuted ?? "text-muted"}`}>
-                Notifikasi
+                {tr("notifications.title")}
               </span>
               <button
                 type="button"
                 onClick={loadList}
                 className={`text-xs font-bold ${t.textMuted ?? "text-muted"} hover:opacity-70`}
               >
-                Muat ulang
+                {tr("notifications.reload")}
               </button>
             </div>
             <div className={`my-1 border-t ${t.panelRule ?? ""}`} />
             {loading ? (
-              <p className={`px-2 py-3 text-sm ${t.textMuted ?? "text-muted"}`}>Memuat...</p>
+              <p className={`px-2 py-3 text-sm ${t.textMuted ?? "text-muted"}`}>{tr("notifications.loading")}</p>
             ) : items.length === 0 ? (
-              <p className={`px-2 py-3 text-sm ${t.textMuted ?? "text-muted"}`}>Belum ada notifikasi.</p>
+              <p className={`px-2 py-3 text-sm ${t.textMuted ?? "text-muted"}`}>{tr("notifications.empty")}</p>
             ) : (
               <ul className="max-h-72 overflow-y-auto">
                 {items.map((n) => (
@@ -200,7 +203,7 @@ export default function NotificationsBell({ t, variant = "icon", triggerClassNam
                       {!n.read && (
                         <span
                           className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-flash-coral"
-                          aria-label="Belum dibaca"
+                          aria-label={tr("notifications.unreadAria")}
                         />
                       )}
                       <span className="min-w-0">
