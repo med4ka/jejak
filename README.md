@@ -1,14 +1,17 @@
 # Jejak
 
-Jejak is a link-in-bio page combined with a URL shortener. Creators get one public profile page (`/u/username`) listing their links, plus short URLs (`/r/code`) with click analytics. Built with Go, PostgreSQL, Redis, and Next.js 14. The repo doubles as a staged architecture learning project (see PRD.md), and runs fully in native mode without Docker.
+Jejak is a link-in-bio page combined with a URL shortener. Creators get one public profile page (`/u/username`) listing their links, plus short URLs (`/r/code`) with click analytics. Built with Go, PostgreSQL, Redis, and Next.js 16. The repo doubles as a staged architecture learning project, and runs fully in native mode without Docker.
 
-Runtime details, endpoints, and simplifications: [ARCHITECTURE.md](ARCHITECTURE.md). Database tables: [SCHEMA.md](SCHEMA.md).
+Additional design docs (architecture, schema, PRD, style guide) are maintained locally and not published. See the code and inline comments for details.
 
 ## Features
 
 - Short URLs with custom slug (up to 30 characters), tags, expiry, and per-device redirect rules
-- Public profile page `/u/{username}` with 11 color themes, social links, avatar upload, and manual link ordering
+- Public profile page `/u/{username}` with 11 color themes, social links, avatar upload, auto-detected brand icons, and manual link ordering
 - Click analytics: clicks by day, breakdown by device and referrer, time-range query, CSV export
+- Deep links for Indonesian e-commerce (Shopee, Tokopedia, TikTok Shop, Lazada, Blibli, Bukalapak): product URLs open the app on mobile with a web fallback, plus a WhatsApp click-to-chat link builder
+- Link health monitor: periodic destination checks with healthy/broken/timeout badges, optional fallback URL, and in-app notifications with a manual re-check
+- Per-link password protection (bcrypt hash, 1-hour access cookie)
 - Unique click counter next to the total click counter
 - Async click logging in full mode: the redirect pushes an event to a Redis list, a worker flushes it to PostgreSQL; baseline mode writes synchronously
 - Session auth: register, login, logout, password and email change, delete account, logout on all devices
@@ -24,16 +27,16 @@ Runtime details, endpoints, and simplifications: [ARCHITECTURE.md](ARCHITECTURE.
 | API | Go 1.26, standard library `net/http` (method-pattern ServeMux) | `"GET /api/..."` routing ships with the standard library; no router dependency |
 | Database | PostgreSQL 17 | Primary plus a second database that simulates a read replica; schema lives in `backend/db/migrations` |
 | Cache and queue | Redis | Cache-aside reads, list queue for click events, lock so only one worker runs |
-| Frontend | Next.js 14 (App Router), React 18, Tailwind CSS, Framer Motion | Server-rendered public pages, client-side dashboard |
-| i18n | JSON dictionaries in `frontend/messages` | Three flat files, no i18n library; locale resolved from a cookie |
-| Local run | Native processes | Docker is unavailable in the dev environment; `infra/docker-compose.yml` is kept as a reference only (ARCHITECTURE.md) |
+| Frontend | Next.js 16 (App Router, Turbopack), React 19, Tailwind CSS 4, Framer Motion 13 | Server-rendered public pages, client-side dashboard; Turbopack is the default bundler |
+| i18n | JSON dictionaries in `frontend/messages` | Three files (Indonesian, English, German), no i18n library; locale resolved from a cookie; API errors carry stable machine-readable codes |
+| Local run | Native processes | Docker is unavailable in the dev environment; `infra/docker-compose.yml` is kept as a reference only |
 
 ## Getting Started
 
 ### Prerequisites
 
 - Go 1.26+ (`go version`)
-- Node.js 18.17+ (Next.js 14 minimum; developed on Node 24)
+- Node.js 20.9+ (Next.js 16 minimum; developed on Node 24)
 - PostgreSQL 17
 - Redis (local `redis://localhost:6379` or Upstash `rediss://`)
 
@@ -99,16 +102,14 @@ Notes:
 jejak/
 ├── backend/
 │   ├── cmd/                 # server, worker, proxy (round-robin LB), loadtest, smoketest, migrate-replica
-│   ├── internal/            # handler, auth, cache, db, env, middleware, migrate, ratelimit, shortener
-│   └── db/                  # migrations (14 up, 12 down) + seed.sql
+│   ├── internal/            # handler, apierror, auth, cache, db, deeplink, env, health, i18n, middleware, migrate, ratelimit, shortener
+│   └── db/                  # migrations (15 up, 13 down) + seed.sql
 ├── frontend/
-│   ├── app/                 # routes: /, /dashboard, /u/[username], /r, /login, /register, ...
-│   ├── components/          # React components
-│   ├── lib/                 # i18n.js, themes.js
+│   ├── app/                 # routes: /, /app, /dashboard (tabs: Ringkasan, Link Saya, Analytics, Profil, API Keys, Pengaturan), /u/[username], /r/[code] (proxy), /tools/whatsapp, /contact, /privacy, /terms, /links; components live in app/components
+│   ├── lib/                 # themes, i18n + translate, animations, brands, deeplink, shortlink, error-code helpers (errors, goError), notifications hook, misc
 │   └── messages/            # id.json, en.json, de.json
 ├── infra/                   # docker-compose.yml + nginx.conf (reference only, not run locally)
-├── README.md, ARCHITECTURE.md, SCHEMA.md
-└── PRD.md, RULES.md, DESIGN.md, PROGRESS.md
+└── README.md
 ```
 
 ### Smoke Test
@@ -143,7 +144,7 @@ To add one:
 
 ## Deployment
 
-Guide: `docs/deploy.md` (placeholder, not written yet). Short version: set `DATABASE_URL`, `REDIS_URL`, `APP_MODE`, `PORT` for the API; build with `go build -o jejak-server ./cmd/server`; build the frontend with `npm run build` and serve it with `npm run start` behind `GO_API_URL` pointing at the API.
+Short version: set `DATABASE_URL`, `REDIS_URL`, `APP_MODE`, `PORT` for the API; build with `go build -o jejak-server ./cmd/server`; build the frontend with `npm run build` and serve it with `npm run start` behind `GO_API_URL` pointing at the API.
 
 ## License
 
