@@ -36,3 +36,46 @@
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Documentation (private, kept local only).
+*.md
+!README.md
+!LICENSE.md
+
+# Dependencies.
+node_modules/
+**/node_modules/
+
+# Build output.
+.next/
+out/
+dist/
+build/
+frontend/.next/
+frontend/out/
+.turbo/
+
+# Go binaries (in addition to *.exe rule above).
+backend/bin/
+
+# Environment (local overrides).
+.env.local
+.env.*.local
+
+# Uploads (user-generated, in addition to backend/ rule above).
+uploads/
+
+# Logs.
+npm-debug.log*
+frontend/dev.log
+frontend/start.log
+
+# IDE.
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test coverage.
+coverage/
+.nyc_output/
