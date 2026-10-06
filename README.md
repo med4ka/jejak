@@ -20,6 +20,42 @@ Additional design docs (architecture, schema, PRD, style guide) are maintained l
 - UI in three languages: Indonesian (default), English, German; locale stored in the `NEXT_LOCALE` cookie
 - Read/write splitting in full mode: writes and auth go to the primary database, redirect reads go to the replica database when `DATABASE_REPLICA_URL` is set
 
+## Status
+
+The project is feature-complete for the current scope and passes its smoke test (12/12 checks). Local deployment verified; production deployment pending.
+
+**Done:**
+- Core shortener (baseline / full modes)
+- Link-in-bio profile page with 11 themes
+- Analytics (clicks, devices, referrers, CSV export)
+- Account management (register, login, password, email, delete)
+- i18n (Indonesian, English, German)
+- Deep link detection (Indonesian e-commerce)
+- WhatsApp click-to-chat builder
+- Link health monitor with fallback URLs
+- Password-protected links
+- Brand icon auto-detection
+- Security audit passed (gosec, govulncheck clean)
+
+**Next:**
+- Production deployment (Railway + Vercel)
+- Custom domain support
+- Redis-backed rate limiter for multi-instance
+- Avatar storage on object storage (S3 / R2)
+
+## Demo
+
+Local: run the three-terminal setup under [Running](#running-3-terminals).
+
+Production: coming soon.
+
+<!--
+Once deployed, replace with:
+
+Production: [https://jejak.example.com](https://jejak.example.com)
+API: [https://api.jejak.example.com](https://api.jejak.example.com)
+-->
+
 ## Tech Stack
 
 | Layer | Tech | Why |
